@@ -1,4 +1,5 @@
 import type { AgentSession } from "../session/session-types";
+import type { AbortRunResult, ResetSessionResult } from "../runtime/agent-runtime";
 
 type StatusMessageInput = Pick<AgentSession, "threadId" | "isRunning" | "lastSummary">;
 
@@ -30,6 +31,10 @@ export function formatRunCompletedMessage(summary?: string | null): string {
   return `Run completed. Summary: ${detail}`;
 }
 
+export function formatRunAbortedMessage(): string {
+  return "Run aborted.";
+}
+
 export function formatRunFailedMessage(error: string): string {
   const detail = collapseInline(error);
 
@@ -38,6 +43,26 @@ export function formatRunFailedMessage(error: string): string {
   }
 
   return `Run failed. Error: ${detail}`;
+}
+
+export function formatResetMessage(result: ResetSessionResult): string {
+  if (result.ok) {
+    return "Session reset.";
+  }
+
+  return "A run is still active. Wait for it to finish or use /abort first.";
+}
+
+export function formatAbortMessage(result: AbortRunResult): string {
+  if (!result.ok) {
+    return "No run is currently active.";
+  }
+
+  if (result.alreadyRequested) {
+    return "Abort already requested. Waiting for the current turn to stop.";
+  }
+
+  return "Abort requested. Waiting for the current turn to stop.";
 }
 
 function collapseInline(value?: string | null): string {

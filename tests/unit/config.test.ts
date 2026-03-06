@@ -29,7 +29,7 @@ describe("resolveWorkspaceDir", () => {
 });
 
 describe("loadConfig", () => {
-  test("loads required variables and resolved workspace dir", () => {
+  test("loads the telegram token, optional OpenAI key override, and resolved workspace dir", () => {
     expect(
       loadConfig({
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -43,9 +43,23 @@ describe("loadConfig", () => {
     });
   });
 
-  test("throws a descriptive error when required variables are missing", () => {
-    expect(() => loadConfig({})).toThrow(
-      "Missing required environment variables: TELEGRAM_BOT_TOKEN, OPENAI_API_KEY",
-    );
+  test("allows config without OPENAI_API_KEY so local codex login can be reused", () => {
+    expect(
+      loadConfig({
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      }),
+    ).toEqual({
+      telegramBotToken: "telegram-token",
+      openAiApiKey: null,
+      workspaceDir: resolveWorkspaceDir({}),
+    });
+  });
+
+  test("returns null token values when env overrides are missing", () => {
+    expect(loadConfig({})).toEqual({
+      telegramBotToken: null,
+      openAiApiKey: null,
+      workspaceDir: resolveWorkspaceDir({}),
+    });
   });
 });

@@ -12,7 +12,11 @@ type CodexPromptResult = {
 type CodexClientDeps<TThread extends CodexThread> = {
   startThread: () => Promise<TThread>;
   resumeThread: (threadId: string) => Promise<TThread>;
-  runPrompt: (thread: TThread, prompt: string) => Promise<CodexPromptResult>;
+  runPrompt: (
+    thread: TThread,
+    prompt: string,
+    options: { signal?: AbortSignal },
+  ) => Promise<CodexPromptResult>;
 };
 
 function normalizeSummary(summary: unknown): string {
@@ -61,12 +65,11 @@ export function createCodexClient<TThread extends CodexThread>({
   runPrompt,
 }: CodexClientDeps<TThread>) {
   return {
-    async runTurn({ threadId, prompt }: CodexRunRequest): Promise<CodexRunResult> {
-      const thread =
-        threadId === null ? await startThread() : await resumeThread(threadId);
+    async runTurn({ threadId, prompt, signal }: CodexRunRequest): Promise<CodexRunResult> {
+      const thread = threadId === null ? await startThread() : await resumeThread(threadId);
 
       try {
-        const result = await runPrompt(thread, prompt);
+        const result = await runPrompt(thread, prompt, { signal });
         const resolvedThreadId = normalizeThreadId(thread.id);
 
         if (resolvedThreadId === null) {
@@ -79,8 +82,26 @@ export function createCodexClient<TThread extends CodexThread>({
           touchedPaths: normalizeTouchedPaths(result.touchedPaths),
         };
       } catch (error) {
-        throw attachThreadId(error, thread.id);
+        throw attachThreadIdAndAbortState(error, {
+          threadId: thread.id,
+          aborted: signal?.aborted ?? false,
+        });
       }
     },
   };
+}
+
+function attachThreadIdAndAbortState(
+  error: unknown,
+  metadata: { threadId: unknown; aborted: boolean },
+): Error {
+  const normalizedError = attachThreadId(error, metadata.threadId);
+
+  if (!metadata.aborted) {
+    return normalizedError;
+  }
+
+  normalizedError.name = "AbortError";
+  normalizedError.message = "Run aborted.";
+  return normalizedError;
 }

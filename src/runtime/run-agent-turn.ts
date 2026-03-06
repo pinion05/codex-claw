@@ -20,6 +20,7 @@ export type RunAgentTurnArgs = {
   store: SessionStore;
   codex: CodexClient;
   logger: RunLogger;
+  signal?: AbortSignal;
 };
 
 export type RunAgentTurnResult = CodexRunResult & {
@@ -32,6 +33,7 @@ export async function runAgentTurn({
   store,
   codex,
   logger,
+  signal,
 }: RunAgentTurnArgs): Promise<RunAgentTurnResult> {
   const chatKey = chatId.toString();
 
@@ -62,6 +64,7 @@ export async function runAgentTurn({
       result = await codex.runTurn({
         threadId: session.threadId,
         prompt,
+        signal,
       });
     } catch (error) {
       const completedAt = new Date().toISOString();

@@ -221,6 +221,54 @@ describe("runAgentTurn", () => {
     );
   });
 
+  test("persists a recovered thread id when the first turn fails after thread creation", async () => {
+    const saved: unknown[] = [];
+    const store = {
+      getOrCreate: mock(async () => ({
+        chatId: "123",
+        threadId: null,
+        isRunning: false,
+        lastStartedAt: null,
+        lastCompletedAt: null,
+        lastSummary: null,
+        logFile: null,
+      })),
+      save: mock(async (value) => {
+        saved.push(value);
+      }),
+    };
+    const codex = {
+      runTurn: mock(async () => {
+        const error = new Error("codex failed");
+        (error as Error & { threadId?: string }).threadId = "thread_recovered";
+        throw error;
+      }),
+    };
+    const writeRunLog = mock(async () => "/tmp/failure.json");
+
+    await expect(
+      runAgentTurn({
+        chatId: 123n,
+        prompt: "do the thing",
+        store,
+        codex,
+        logger: { writeRunLog },
+      }),
+    ).rejects.toThrow("codex failed");
+
+    expect(saved[saved.length - 1]).toMatchObject({
+      chatId: "123",
+      threadId: "thread_recovered",
+      isRunning: false,
+      logFile: "/tmp/failure.json",
+    });
+    expect(writeRunLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread_recovered",
+      }),
+    );
+  });
+
   test("clears running state and rethrows when log writing fails after codex succeeds", async () => {
     const saved: unknown[] = [];
     const store = {

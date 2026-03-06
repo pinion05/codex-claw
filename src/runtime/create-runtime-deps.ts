@@ -1,35 +1,25 @@
-import { Bot } from "grammy";
 import type { CreateBotHandlersDeps } from "../bot/create-bot";
 import { formatStatusMessage } from "../bot/formatters";
 import type { AppConfig } from "../config";
 import { createSdkRuntimeClient } from "../codex/sdk-runtime-client";
 import { FileSessionStore } from "../session/session-store";
+import { createAgentRuntime } from "./agent-runtime";
 import { createRunLogger } from "./logging";
-import { runAgentTurn } from "./run-agent-turn";
 
-export type RuntimeDeps = {
-  bot: Bot;
-  handlers: CreateBotHandlersDeps;
-};
-
-export function createRuntimeDeps(config: AppConfig): RuntimeDeps {
+export function createRuntimeDeps(config: AppConfig): CreateBotHandlersDeps {
   const store = new FileSessionStore(config.workspaceDir);
   const codex = createSdkRuntimeClient(config.openAiApiKey, config.workspaceDir);
   const logger = createRunLogger(config.workspaceDir);
-  const bot = new Bot(config.telegramBotToken);
+  const runtime = createAgentRuntime({
+    store,
+    codex,
+    logger,
+  });
 
   return {
-    bot,
-    handlers: {
-      getStatusMessage: async (chatId) => formatStatusMessage(await store.getOrCreate(chatId)),
-      runTurn: async (chatId, prompt) =>
-        runAgentTurn({
-          chatId,
-          prompt,
-          store,
-          codex,
-          logger,
-        }),
-    },
+    getStatusMessage: async (chatId) => formatStatusMessage(await runtime.getSession(chatId)),
+    resetSession: async (chatId) => runtime.resetSession(chatId),
+    abortRun: async (chatId) => runtime.abortRun(chatId),
+    runTurn: async (chatId, prompt) => runtime.runTurn(chatId, prompt),
   };
 }

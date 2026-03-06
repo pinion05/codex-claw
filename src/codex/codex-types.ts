@@ -1,6 +1,7 @@
 export type CodexRunRequest = {
   threadId: string | null;
   prompt: string;
+  signal?: AbortSignal;
 };
 
 export type CodexRunResult = {

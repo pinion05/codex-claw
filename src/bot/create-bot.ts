@@ -1,6 +1,13 @@
 import type { Bot, Context } from "grammy";
+import type { AbortRunResult, ResetSessionResult } from "../runtime/agent-runtime";
 import { parseCommand } from "./commands";
-import { formatRunCompletedMessage, formatRunFailedMessage } from "./formatters";
+import {
+  formatAbortMessage,
+  formatResetMessage,
+  formatRunAbortedMessage,
+  formatRunCompletedMessage,
+  formatRunFailedMessage,
+} from "./formatters";
 
 type Reply = (value: string) => Promise<void> | void;
 
@@ -10,17 +17,10 @@ export type BotTextInput = {
   reply: Reply;
 };
 
-export type AbortRunResult =
-  | void
-  | {
-      ok: boolean;
-      message?: string;
-    };
-
 export type CreateBotHandlersDeps = {
   getStatusMessage: (chatId: bigint) => Promise<string>;
-  resetSession?: (chatId: bigint) => Promise<void>;
-  abortRun?: (chatId: bigint) => Promise<AbortRunResult>;
+  resetSession: (chatId: bigint) => Promise<ResetSessionResult>;
+  abortRun: (chatId: bigint) => Promise<AbortRunResult>;
   runTurn: (
     chatId: bigint,
     prompt: string,
@@ -44,8 +44,10 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
             await reply(await deps.getStatusMessage(chatId));
             return;
           case "reset":
+            await reply(formatResetMessage(await deps.resetSession(chatId)));
+            return;
           case "abort": {
-            await reply(buildUnavailableCommandMessage(command.name));
+            await reply(formatAbortMessage(await deps.abortRun(chatId)));
             return;
           }
         }
@@ -55,6 +57,11 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
         const result = await deps.runTurn(chatId, text);
         await reply(formatRunCompletedMessage(result.summary ?? null));
       } catch (error) {
+        if (isAbortError(error)) {
+          await reply(formatRunAbortedMessage());
+          return;
+        }
+
         const message = error instanceof Error ? error.message : String(error);
         await reply(formatRunFailedMessage(message));
       }
@@ -79,9 +86,11 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
 }
 
 function buildHelpMessage(): string {
-  return ["Send a prompt to run Codex.", "Available commands: /status /help"].join("\n");
+  return ["Send a prompt to run Codex.", "Available commands: /status /reset /abort /help"].join(
+    "\n",
+  );
 }
 
-function buildUnavailableCommandMessage(commandName: "reset" | "abort"): string {
-  return `/${commandName} is not available yet. Use /status while agent control commands are still being wired.`;
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }

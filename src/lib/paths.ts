@@ -8,5 +8,9 @@ export function resolveWorkspaceDir(env: Record<string, string | undefined>) {
     return path.resolve(workspaceDir);
   }
 
-  return path.join(os.homedir(), ".codex-claw", "workspace");
+  return path.join(resolveCodexClawHomeDir(), "workspace");
+}
+
+export function resolveCodexClawHomeDir() {
+  return path.join(os.homedir(), ".codex-claw");
 }

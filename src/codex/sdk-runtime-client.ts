@@ -6,12 +6,14 @@ type RuntimeThread = {
   thread: Thread;
 };
 
-export function createSdkRuntimeClient(apiKey: string, workingDirectory: string) {
-  const sdk = new Codex({ apiKey });
+export function createSdkRuntimeClient(apiKey: string | null, workingDirectory: string) {
+  const sdk = apiKey ? new Codex({ apiKey }) : new Codex();
   const threadOptions: ThreadOptions = {
     approvalPolicy: "never",
+    sandboxMode: "danger-full-access",
     workingDirectory,
     skipGitRepoCheck: true,
+    networkAccessEnabled: true,
   };
 
   return createCodexClient<RuntimeThread>({
@@ -23,9 +25,9 @@ export function createSdkRuntimeClient(apiKey: string, workingDirectory: string)
       id: threadId,
       thread: sdk.resumeThread(threadId, threadOptions),
     }),
-    runPrompt: async (runtimeThread, prompt) => {
+    runPrompt: async (runtimeThread, prompt, { signal }) => {
       try {
-        const turn = await runtimeThread.thread.run(prompt);
+        const turn = await runtimeThread.thread.run(prompt, { signal });
 
         return {
           summary: turn.finalResponse,
