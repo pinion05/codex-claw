@@ -65,8 +65,7 @@ CODEX_WORKSPACE_DIR=
 5. Run the local checks.
 
 ```bash
-bun test
-bun run typecheck
+bun run check
 ```
 
 6. Start the bot.
@@ -136,8 +135,53 @@ The fixed operational workspace stores local state and logs under predictable pa
 
 - `bun run dev` starts the Telegram bot with file watching.
 - `bun run start` starts the bot once without watch mode.
+- `bun run check` runs the full verification suite.
 - `bun run typecheck` runs the TypeScript typecheck.
 - `bun test` runs the unit, integration, and smoke tests.
+
+## Publishing
+
+Before publishing, make sure your npm registry auth is available to Bun.
+
+```bash
+bun pm whoami
+```
+
+Recommended release flow:
+
+1. Run the full checks.
+
+```bash
+bun run check
+```
+
+2. Inspect the package tarball and registry publish dry-run.
+
+```bash
+bun run pack:dry-run
+bun run publish:dry-run
+```
+
+3. Bump the version.
+
+```bash
+bun run release:patch
+# or
+bun run release:minor
+# or
+bun run release:major
+```
+
+4. Publish to npm.
+
+```bash
+bun run publish:npm
+```
+
+Notes:
+
+- `prepublishOnly` runs `bun run check` before publish.
+- This package is intended for Bun-based usage and is published through `bun publish`.
 
 ## Smoke Testing
 

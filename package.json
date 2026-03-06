@@ -3,10 +3,20 @@
   "version": "0.1.0",
   "description": "Telegram-native Codex agent harness for Bun",
   "private": false,
+  "packageManager": "bun@1.3.9",
   "type": "module",
   "bin": {
-    "codex-claw": "./bin/codex-claw"
+    "codex-claw": "bin/codex-claw"
   },
+  "keywords": [
+    "telegram",
+    "bot",
+    "codex",
+    "openai",
+    "grammy",
+    "bun",
+    "agent"
+  ],
   "files": [
     "bin",
     "src",
@@ -24,8 +34,16 @@
     "url": "https://github.com/pinion05/codex-claw/issues"
   },
   "scripts": {
+    "check": "bun test && bun run typecheck",
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
+    "pack:dry-run": "bun pm pack --dry-run",
+    "publish:dry-run": "bun publish --dry-run --access public",
+    "publish:npm": "bun publish --access public",
+    "release:patch": "bun pm version patch",
+    "release:minor": "bun pm version minor",
+    "release:major": "bun pm version major",
+    "prepublishOnly": "bun run check",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
