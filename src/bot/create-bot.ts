@@ -8,12 +8,16 @@ import {
   formatRunCompletedMessage,
   formatRunFailedMessage,
 } from "./formatters";
+import { createTypingHeartbeat } from "./typing-heartbeat";
 
 type Reply = (value: string) => Promise<void> | void;
+type StopTyping = (() => Promise<void> | void) | void;
+type StartTyping = () => Promise<StopTyping> | StopTyping;
 
 export type BotTextInput = {
   chatId: bigint;
   text: string;
+  startTyping?: StartTyping;
   reply: Reply;
 };
 
@@ -31,39 +35,45 @@ export type CreateBotHandlersDeps = {
 
 export function createBotHandlers(deps: CreateBotHandlersDeps) {
   return {
-    async onText({ chatId, text, reply }: BotTextInput): Promise<void> {
-      const command = parseCommand(text);
-
-      if (command) {
-        switch (command.name) {
-          case "start":
-          case "help":
-            await reply(buildHelpMessage());
-            return;
-          case "status":
-            await reply(await deps.getStatusMessage(chatId));
-            return;
-          case "reset":
-            await reply(formatResetMessage(await deps.resetSession(chatId)));
-            return;
-          case "abort": {
-            await reply(formatAbortMessage(await deps.abortRun(chatId)));
-            return;
-          }
-        }
-      }
+    async onText({ chatId, text, startTyping, reply }: BotTextInput): Promise<void> {
+      const stopTyping = await startTyping?.();
 
       try {
-        const result = await deps.runTurn(chatId, text);
-        await reply(formatRunCompletedMessage(result.summary ?? null));
-      } catch (error) {
-        if (isAbortError(error)) {
-          await reply(formatRunAbortedMessage());
-          return;
+        const command = parseCommand(text);
+
+        if (command) {
+          switch (command.name) {
+            case "start":
+            case "help":
+              await reply(buildHelpMessage());
+              return;
+            case "status":
+              await reply(await deps.getStatusMessage(chatId));
+              return;
+            case "reset":
+              await reply(formatResetMessage(await deps.resetSession(chatId)));
+              return;
+            case "abort": {
+              await reply(formatAbortMessage(await deps.abortRun(chatId)));
+              return;
+            }
+          }
         }
 
-        const message = error instanceof Error ? error.message : String(error);
-        await reply(formatRunFailedMessage(message));
+        try {
+          const result = await deps.runTurn(chatId, text);
+          await reply(formatRunCompletedMessage(result.summary ?? null));
+        } catch (error) {
+          if (isAbortError(error)) {
+            await reply(formatRunAbortedMessage());
+            return;
+          }
+
+          const message = error instanceof Error ? error.message : String(error);
+          await reply(formatRunFailedMessage(message));
+        }
+      } finally {
+        await stopTyping?.();
       }
     },
   };
@@ -76,6 +86,12 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
     await handlers.onText({
       chatId: BigInt(String(ctx.chat.id)),
       text: ctx.message.text,
+      startTyping: () =>
+        createTypingHeartbeat({
+          sendTyping: async () => {
+            await ctx.replyWithChatAction("typing");
+          },
+        }),
       reply: async (value) => {
         await ctx.reply(value);
       },
