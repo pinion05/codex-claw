@@ -30,8 +30,12 @@ describe("run lifecycle formatters", () => {
 
   test("collapses multiline summaries into concise completion text", () => {
     expect(formatRunCompletedMessage("done\n\nwith follow-up details")).toBe(
-      "Run completed. Summary: done with follow-up details",
+      "done with follow-up details",
     );
+  });
+
+  test("shows NULL when the completion summary is empty", () => {
+    expect(formatRunCompletedMessage(null)).toBe("NULL");
   });
 
   test("collapses multiline errors into concise failure text", () => {
