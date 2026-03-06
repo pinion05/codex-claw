@@ -4,6 +4,8 @@ import { createBotHandlers } from "../../src/bot/create-bot";
 describe("createBotHandlers", () => {
   test("routes /status to the formatter and normal text to the runtime", async () => {
     const replies: string[] = [];
+    const stopTyping = mock(() => undefined);
+    const startTyping = mock(async () => stopTyping);
     const handlers = createBotHandlers({
       getStatusMessage: mock(async () => "idle"),
       resetSession: mock(async () => ({ ok: true as const })),
@@ -14,6 +16,7 @@ describe("createBotHandlers", () => {
     await handlers.onText({
       chatId: 123n,
       text: "/status",
+      startTyping,
       reply: async (value: string) => {
         replies.push(value);
       },
@@ -22,6 +25,7 @@ describe("createBotHandlers", () => {
     await handlers.onText({
       chatId: 123n,
       text: "hello",
+      startTyping,
       reply: async (value: string) => {
         replies.push(value);
       },
@@ -29,6 +33,8 @@ describe("createBotHandlers", () => {
 
     expect(replies[0]).toBe("idle");
     expect(replies[1]).toContain("done");
+    expect(startTyping).toHaveBeenCalledTimes(2);
+    expect(stopTyping).toHaveBeenCalledTimes(2);
   });
 
   test("formats control commands with explicit feedback", async () => {
@@ -117,6 +123,8 @@ describe("createBotHandlers", () => {
 
   test("replies with an explicit aborted message when the runtime aborts", async () => {
     const replies: string[] = [];
+    const stopTyping = mock(() => undefined);
+    const startTyping = mock(async () => stopTyping);
     const handlers = createBotHandlers({
       getStatusMessage: mock(async () => "idle"),
       resetSession: mock(async () => ({ ok: true as const })),
@@ -131,11 +139,14 @@ describe("createBotHandlers", () => {
     await handlers.onText({
       chatId: 123n,
       text: "hello",
+      startTyping,
       reply: async (value: string) => {
         replies.push(value);
       },
     });
 
     expect(replies).toEqual(["Run aborted."]);
+    expect(startTyping).toHaveBeenCalledTimes(1);
+    expect(stopTyping).toHaveBeenCalledTimes(1);
   });
 });
