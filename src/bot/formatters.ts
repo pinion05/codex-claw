@@ -58,6 +58,10 @@ export function formatAbortMessage(result: AbortRunResult): string {
     return "No run is currently active.";
   }
 
+  if (result.recoveredStale) {
+    return "Recovered stale running state. No live run was active.";
+  }
+
   if (result.alreadyRequested) {
     return "Abort already requested. Waiting for the current turn to stop.";
   }

@@ -16,7 +16,7 @@ type CodexClient = {
 export type ResetSessionResult = { ok: true } | { ok: false; reason: "running" };
 
 export type AbortRunResult =
-  | { ok: true; alreadyRequested: boolean }
+  | { ok: true; alreadyRequested: boolean; recoveredStale?: boolean }
   | { ok: false; reason: "not-running" };
 
 type CreateAgentRuntimeArgs = {
@@ -28,9 +28,33 @@ type CreateAgentRuntimeArgs = {
 export function createAgentRuntime({ store, codex, logger }: CreateAgentRuntimeArgs) {
   const activeRuns = new Map<string, AbortController>();
 
+  async function recoverStaleSession(
+    chatId: bigint,
+    options?: { ignoreActiveRun?: boolean },
+  ): Promise<{ session: AgentSession; recovered: boolean }> {
+    const chatKey = chatId.toString();
+    const session = await store.getOrCreate(chatId);
+
+    if (!session.isRunning) {
+      return { session, recovered: false };
+    }
+
+    if (activeRuns.has(chatKey) && !options?.ignoreActiveRun) {
+      return { session, recovered: false };
+    }
+
+    const recoveredSession: AgentSession = {
+      ...session,
+      isRunning: false,
+    };
+
+    await store.save(recoveredSession);
+    return { session: recoveredSession, recovered: true };
+  }
+
   return {
     async getSession(chatId: bigint): Promise<AgentSession> {
-      return store.getOrCreate(chatId);
+      return (await recoverStaleSession(chatId)).session;
     },
     async runTurn(chatId: bigint, prompt: string): Promise<RunAgentTurnResult> {
       const chatKey = chatId.toString();
@@ -43,6 +67,8 @@ export function createAgentRuntime({ store, codex, logger }: CreateAgentRuntimeA
       activeRuns.set(chatKey, controller);
 
       try {
+        await recoverStaleSession(chatId, { ignoreActiveRun: true });
+
         return await runAgentTurn({
           chatId,
           prompt,
@@ -64,7 +90,7 @@ export function createAgentRuntime({ store, codex, logger }: CreateAgentRuntimeA
         return { ok: false, reason: "running" };
       }
 
-      const session = await store.getOrCreate(chatId);
+      const session = (await recoverStaleSession(chatId)).session;
 
       if (session.isRunning) {
         return { ok: false, reason: "running" };
@@ -74,9 +100,20 @@ export function createAgentRuntime({ store, codex, logger }: CreateAgentRuntimeA
       return { ok: true };
     },
     async abortRun(chatId: bigint): Promise<AbortRunResult> {
-      const controller = activeRuns.get(chatId.toString());
+      const chatKey = chatId.toString();
+      const controller = activeRuns.get(chatKey);
 
       if (!controller) {
+        const { recovered } = await recoverStaleSession(chatId);
+
+        if (recovered) {
+          return {
+            ok: true,
+            alreadyRequested: false,
+            recoveredStale: true,
+          };
+        }
+
         return { ok: false, reason: "not-running" };
       }
 

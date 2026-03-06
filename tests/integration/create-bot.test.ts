@@ -66,6 +66,33 @@ describe("createBotHandlers", () => {
     expect(runTurn).not.toHaveBeenCalled();
   });
 
+  test("reports when /abort recovers a stale persisted run state", async () => {
+    const replies: string[] = [];
+    const handlers = createBotHandlers({
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(
+        async () =>
+          ({
+            ok: true as const,
+            alreadyRequested: false as const,
+            recoveredStale: true as const,
+          }),
+      ),
+      runTurn: mock(async () => ({ summary: "done" })),
+    });
+
+    await handlers.onText({
+      chatId: 123n,
+      text: "/abort",
+      reply: async (value: string) => {
+        replies.push(value);
+      },
+    });
+
+    expect(replies).toEqual(["Recovered stale running state. No live run was active."]);
+  });
+
   test("help advertises the available control commands", async () => {
     const replies: string[] = [];
     const handlers = createBotHandlers({
