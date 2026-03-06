@@ -1,0 +1,19 @@
+{
+  "name": "codex-claw",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "^0.111.0",
+    "grammy": "1.41.1"
+  }
+}
