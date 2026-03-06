@@ -22,7 +22,7 @@ export function formatRunStartedMessage(threadId: string): string {
 }
 
 export function formatRunCompletedMessage(summary?: string | null): string {
-  const detail = collapseInline(summary);
+  const detail = preserveLineBreaks(summary);
 
   if (detail.length === 0) {
     return "NULL";
@@ -36,13 +36,13 @@ export function formatRunAbortedMessage(): string {
 }
 
 export function formatRunFailedMessage(error: string): string {
-  const detail = collapseInline(error);
+  const detail = preserveLineBreaks(error);
 
   if (detail.length === 0) {
     return "Run failed.";
   }
 
-  return `Run failed. Error: ${detail}`;
+  return `Run failed. Error:\n${detail}`;
 }
 
 export function formatResetMessage(result: ResetSessionResult): string {
@@ -69,10 +69,10 @@ export function formatAbortMessage(result: AbortRunResult): string {
   return "Abort requested. Waiting for the current turn to stop.";
 }
 
-function collapseInline(value?: string | null): string {
+function preserveLineBreaks(value?: string | null): string {
   if (!value) {
     return "";
   }
 
-  return value.replace(/\s+/g, " ").trim();
+  return value.replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n").trim();
 }
