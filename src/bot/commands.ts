@@ -1,7 +1,10 @@
-const allowed = new Set(["start", "help", "status", "reset", "abort"]);
+const allowedCommands = ["start", "help", "status", "reset", "abort"] as const;
+const allowed = new Set<string>(allowedCommands);
+
+type CommandName = (typeof allowedCommands)[number];
 
 export type ParsedCommand = {
-  name: string;
+  name: CommandName;
   args: string;
 };
 
@@ -15,7 +18,7 @@ export function parseCommand(text: string): ParsedCommand | null {
   const [raw, ...rest] = trimmed.split(/\s+/);
   const name = raw.slice(1).split("@", 2)[0];
 
-  if (!allowed.has(name)) {
+  if (!isCommandName(name)) {
     return null;
   }
 
@@ -23,4 +26,8 @@ export function parseCommand(text: string): ParsedCommand | null {
     name,
     args: rest.join(" "),
   };
+}
+
+function isCommandName(value: string): value is CommandName {
+  return allowed.has(value);
 }

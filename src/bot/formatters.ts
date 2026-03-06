@@ -21,19 +21,29 @@ export function formatRunStartedMessage(threadId: string): string {
 }
 
 export function formatRunCompletedMessage(summary?: string | null): string {
-  if (!summary || summary.trim().length === 0) {
+  const detail = collapseInline(summary);
+
+  if (detail.length === 0) {
     return "Run completed.";
   }
 
-  return [`Run completed.`, `Summary: ${summary.trim()}`].join("\n");
+  return `Run completed. Summary: ${detail}`;
 }
 
 export function formatRunFailedMessage(error: string): string {
-  const detail = error.trim();
+  const detail = collapseInline(error);
 
   if (detail.length === 0) {
     return "Run failed.";
   }
 
-  return [`Run failed.`, `Error: ${detail}`].join("\n");
+  return `Run failed. Error: ${detail}`;
+}
+
+function collapseInline(value?: string | null): string {
+  if (!value) {
+    return "";
+  }
+
+  return value.replace(/\s+/g, " ").trim();
 }

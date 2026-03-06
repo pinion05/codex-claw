@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { formatStatusMessage } from "../../src/bot/formatters";
+import {
+  formatRunCompletedMessage,
+  formatRunFailedMessage,
+  formatRunStartedMessage,
+  formatStatusMessage,
+} from "../../src/bot/formatters";
 
 describe("formatStatusMessage", () => {
   test("shows thread and run state in user-friendly text", () => {
@@ -12,5 +17,26 @@ describe("formatStatusMessage", () => {
     expect(text).toContain("thread_1");
     expect(text).toContain("idle");
     expect(text).toContain("last run ok");
+  });
+});
+
+describe("run lifecycle formatters", () => {
+  test("shows when a run starts", () => {
+    const text = formatRunStartedMessage("thread_1");
+
+    expect(text).toContain("Run started");
+    expect(text).toContain("thread_1");
+  });
+
+  test("collapses multiline summaries into concise completion text", () => {
+    expect(formatRunCompletedMessage("done\n\nwith follow-up details")).toBe(
+      "Run completed. Summary: done with follow-up details",
+    );
+  });
+
+  test("collapses multiline errors into concise failure text", () => {
+    expect(formatRunFailedMessage("boom\n  at task.ts:1\n  at worker.ts:2")).toBe(
+      "Run failed. Error: boom at task.ts:1 at worker.ts:2",
+    );
   });
 });
