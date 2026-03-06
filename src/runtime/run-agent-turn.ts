@@ -1,3 +1,4 @@
+import { getThreadIdFromError } from "../codex/codex-client";
 import type { CodexRunRequest, CodexRunResult } from "../codex/codex-types";
 import type { AgentSession } from "../session/session-types";
 import type { RunLogger } from "./logging";
@@ -64,13 +65,14 @@ export async function runAgentTurn({
       });
     } catch (error) {
       const completedAt = new Date().toISOString();
+      const recoveredThreadId = getThreadIdFromError(error) ?? session.threadId;
       let logFile = runningSession.logFile;
 
       try {
         logFile = await logger.writeRunLog({
           chatId: session.chatId,
           prompt,
-          threadId: session.threadId,
+          threadId: recoveredThreadId,
           summary: null,
           touchedPaths: [],
           startedAt,
@@ -87,7 +89,7 @@ export async function runAgentTurn({
       await store.save({
         ...runningSession,
         isRunning: false,
-        threadId: session.threadId,
+        threadId: recoveredThreadId,
         lastSummary: session.lastSummary,
         lastCompletedAt: completedAt,
         logFile,

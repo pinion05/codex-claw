@@ -1,7 +1,7 @@
 import type { CodexRunRequest, CodexRunResult } from "./codex-types";
 
 type CodexThread = {
-  id: string;
+  id: string | null;
 };
 
 type CodexPromptResult = {
@@ -9,10 +9,10 @@ type CodexPromptResult = {
   touchedPaths?: unknown;
 };
 
-type CodexClientDeps = {
-  startThread: () => Promise<CodexThread>;
-  resumeThread: (threadId: string) => Promise<CodexThread>;
-  runPrompt: (thread: CodexThread, prompt: string) => Promise<CodexPromptResult>;
+type CodexClientDeps<TThread extends CodexThread> = {
+  startThread: () => Promise<TThread>;
+  resumeThread: (threadId: string) => Promise<TThread>;
+  runPrompt: (thread: TThread, prompt: string) => Promise<CodexPromptResult>;
 };
 
 function normalizeSummary(summary: unknown): string {
@@ -27,22 +27,60 @@ function normalizeTouchedPaths(touchedPaths: unknown): string[] {
   return touchedPaths.filter((path): path is string => typeof path === "string");
 }
 
-export function createCodexClient({
+function normalizeThreadId(threadId: unknown): string | null {
+  if (typeof threadId !== "string") {
+    return null;
+  }
+
+  const normalized = threadId.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function getThreadIdFromError(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("threadId" in error)) {
+    return null;
+  }
+
+  return normalizeThreadId((error as { threadId?: unknown }).threadId);
+}
+
+function attachThreadId(error: unknown, threadId: unknown): Error {
+  const normalizedError = error instanceof Error ? error : new Error(String(error));
+  const recoveredThreadId = getThreadIdFromError(normalizedError) ?? normalizeThreadId(threadId);
+
+  if (recoveredThreadId) {
+    Object.assign(normalizedError, { threadId: recoveredThreadId });
+  }
+
+  return normalizedError;
+}
+
+export function createCodexClient<TThread extends CodexThread>({
   startThread,
   resumeThread,
   runPrompt,
-}: CodexClientDeps) {
+}: CodexClientDeps<TThread>) {
   return {
     async runTurn({ threadId, prompt }: CodexRunRequest): Promise<CodexRunResult> {
       const thread =
         threadId === null ? await startThread() : await resumeThread(threadId);
-      const result = await runPrompt(thread, prompt);
 
-      return {
-        threadId: thread.id,
-        summary: normalizeSummary(result.summary),
-        touchedPaths: normalizeTouchedPaths(result.touchedPaths),
-      };
+      try {
+        const result = await runPrompt(thread, prompt);
+        const resolvedThreadId = normalizeThreadId(thread.id);
+
+        if (resolvedThreadId === null) {
+          throw new Error("Codex thread id was unavailable after the turn completed");
+        }
+
+        return {
+          threadId: resolvedThreadId,
+          summary: normalizeSummary(result.summary),
+          touchedPaths: normalizeTouchedPaths(result.touchedPaths),
+        };
+      } catch (error) {
+        throw attachThreadId(error, thread.id);
+      }
     },
   };
 }

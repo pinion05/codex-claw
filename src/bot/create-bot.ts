@@ -19,8 +19,8 @@ export type AbortRunResult =
 
 export type CreateBotHandlersDeps = {
   getStatusMessage: (chatId: bigint) => Promise<string>;
-  resetSession: (chatId: bigint) => Promise<void>;
-  abortRun: (chatId: bigint) => Promise<AbortRunResult>;
+  resetSession?: (chatId: bigint) => Promise<void>;
+  abortRun?: (chatId: bigint) => Promise<AbortRunResult>;
   runTurn: (
     chatId: bigint,
     prompt: string,
@@ -44,12 +44,8 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
             await reply(await deps.getStatusMessage(chatId));
             return;
           case "reset":
-            await deps.resetSession(chatId);
-            await reply("Session reset.");
-            return;
           case "abort": {
-            const result = await deps.abortRun(chatId);
-            await reply(resolveAbortMessage(result));
+            await reply(buildUnavailableCommandMessage(command.name));
             return;
           }
         }
@@ -83,17 +79,9 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
 }
 
 function buildHelpMessage(): string {
-  return ["Send a prompt to run Codex.", "Commands: /status /reset /abort /help"].join("\n");
+  return ["Send a prompt to run Codex.", "Available commands: /status /help"].join("\n");
 }
 
-function resolveAbortMessage(result: AbortRunResult): string {
-  if (result && typeof result === "object") {
-    if (result.message && result.message.trim().length > 0) {
-      return result.message;
-    }
-
-    return result.ok ? "Abort requested." : "Unable to abort the current run.";
-  }
-
-  return "Abort requested.";
+function buildUnavailableCommandMessage(commandName: "reset" | "abort"): string {
+  return `/${commandName} is not available yet. Use /status while agent control commands are still being wired.`;
 }
