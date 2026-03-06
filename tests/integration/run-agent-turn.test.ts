@@ -35,8 +35,7 @@ describe("runAgentTurn", () => {
         (completedAt.getUTCMonth() + 1).toString().padStart(2, "0"),
         completedAt.getUTCDate().toString().padStart(2, "0"),
       );
-      expect(result.logFile).not.toBeNull();
-      const logFile = result.logFile!;
+      const logFile = result.logFile;
       const logEntry = JSON.parse(readFileSync(logFile, "utf8")) as Record<string, unknown>;
 
       expect(result.summary).toBe("done");
@@ -222,7 +221,7 @@ describe("runAgentTurn", () => {
     );
   });
 
-  test("returns success when codex succeeds but log writing fails", async () => {
+  test("clears running state and rethrows when log writing fails after codex succeeds", async () => {
     const saved: unknown[] = [];
     const store = {
       getOrCreate: mock(async () => ({
@@ -249,26 +248,74 @@ describe("runAgentTurn", () => {
       throw new Error("log failed");
     });
 
-    const result = await runAgentTurn({
-      chatId: 123n,
-      prompt: "do the thing",
-      store,
-      codex,
-      logger: { writeRunLog },
-    });
+    await expect(
+      runAgentTurn({
+        chatId: 123n,
+        prompt: "do the thing",
+        store,
+        codex,
+        logger: { writeRunLog },
+      }),
+    ).rejects.toThrow("log failed");
 
-    expect(saved.length).toBe(2);
-    expect(saved[1]).toMatchObject({
+    expect(saved.length).toBeGreaterThanOrEqual(2);
+    expect(saved[saved.length - 1]).toMatchObject({
       chatId: "123",
       threadId: "thread_1",
       isRunning: false,
       lastSummary: "done",
       logFile: null,
     });
-    expect(result).toMatchObject({
+  });
+
+  test("clears running state and rethrows when saving log metadata fails after codex succeeds", async () => {
+    const saved: unknown[] = [];
+    let saveCalls = 0;
+    const store = {
+      getOrCreate: mock(async () => ({
+        chatId: "123",
+        threadId: null,
+        isRunning: false,
+        lastStartedAt: null,
+        lastCompletedAt: null,
+        lastSummary: null,
+        logFile: null,
+      })),
+      save: mock(async (value) => {
+        saveCalls += 1;
+        saved.push(value);
+
+        if (saveCalls === 3) {
+          throw new Error("save failed");
+        }
+      }),
+    };
+    const codex = {
+      runTurn: mock(async () => ({
+        threadId: "thread_1",
+        summary: "done",
+        touchedPaths: ["/tmp/demo.txt"],
+      })),
+    };
+    const writeRunLog = mock(async () => "/tmp/log.json");
+
+    await expect(
+      runAgentTurn({
+        chatId: 123n,
+        prompt: "do the thing",
+        store,
+        codex,
+        logger: { writeRunLog },
+      }),
+    ).rejects.toThrow("save failed");
+
+    expect(saved.length).toBeGreaterThanOrEqual(4);
+    expect(saved[saved.length - 1]).toMatchObject({
+      chatId: "123",
       threadId: "thread_1",
-      summary: "done",
-      touchedPaths: ["/tmp/demo.txt"],
+      isRunning: false,
+      lastSummary: "done",
+      logFile: "/tmp/log.json",
     });
   });
 });

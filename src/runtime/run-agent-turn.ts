@@ -22,7 +22,7 @@ export type RunAgentTurnArgs = {
 };
 
 export type RunAgentTurnResult = CodexRunResult & {
-  logFile: string | null;
+  logFile: string;
 };
 
 export async function runAgentTurn({
@@ -42,11 +42,6 @@ export async function runAgentTurn({
 
   try {
     const session = await store.getOrCreate(chatId);
-    let nextThreadId = session.threadId;
-    let nextSummary = session.lastSummary;
-    let logSummary: string | null = null;
-    let touchedPaths: string[] = [];
-
     if (session.isRunning) {
       throw new Error(`Session for chat ${session.chatId} is already running`);
     }
@@ -60,57 +55,13 @@ export async function runAgentTurn({
 
     await store.save(runningSession);
 
+    let result: CodexRunResult;
+
     try {
-      const result = await codex.runTurn({
+      result = await codex.runTurn({
         threadId: session.threadId,
         prompt,
       });
-      nextThreadId = result.threadId;
-      nextSummary = result.summary;
-      logSummary = result.summary;
-      touchedPaths = result.touchedPaths;
-      const completedAt = new Date().toISOString();
-      const completedSession: AgentSession = {
-        ...runningSession,
-        isRunning: false,
-        threadId: result.threadId,
-        lastSummary: result.summary,
-        lastCompletedAt: completedAt,
-      };
-
-      await store.save(completedSession);
-
-      let logFile = completedSession.logFile;
-
-      try {
-        logFile = await logger.writeRunLog({
-          chatId: session.chatId,
-          prompt,
-          threadId: result.threadId,
-          summary: result.summary,
-          touchedPaths: result.touchedPaths,
-          startedAt,
-          completedAt,
-          status: "completed",
-          error: null,
-        });
-
-        try {
-          await store.save({
-            ...completedSession,
-            logFile,
-          });
-        } catch {
-          // Best-effort log file persistence must not fail the turn.
-        }
-      } catch {
-        logFile = completedSession.logFile;
-      }
-
-      return {
-        ...result,
-        logFile,
-      };
     } catch (error) {
       const completedAt = new Date().toISOString();
       let logFile = runningSession.logFile;
@@ -119,9 +70,9 @@ export async function runAgentTurn({
         logFile = await logger.writeRunLog({
           chatId: session.chatId,
           prompt,
-          threadId: nextThreadId,
-          summary: logSummary,
-          touchedPaths,
+          threadId: session.threadId,
+          summary: null,
+          touchedPaths: [],
           startedAt,
           completedAt,
           status: "failed",
@@ -136,15 +87,65 @@ export async function runAgentTurn({
       await store.save({
         ...runningSession,
         isRunning: false,
-        threadId: nextThreadId,
-        lastSummary: nextSummary,
+        threadId: session.threadId,
+        lastSummary: session.lastSummary,
         lastCompletedAt: completedAt,
         logFile,
       });
 
       throw error;
     }
+
+    const completedAt = new Date().toISOString();
+    const completedSession: AgentSession = {
+      ...runningSession,
+      isRunning: false,
+      threadId: result.threadId,
+      lastSummary: result.summary,
+      lastCompletedAt: completedAt,
+    };
+    let logFile = completedSession.logFile;
+
+    try {
+      await store.save(completedSession);
+
+      logFile = await logger.writeRunLog({
+        chatId: session.chatId,
+        prompt,
+        threadId: result.threadId,
+        summary: result.summary,
+        touchedPaths: result.touchedPaths,
+        startedAt,
+        completedAt,
+        status: "completed",
+        error: null,
+      });
+
+      await store.save({
+        ...completedSession,
+        logFile,
+      });
+
+      return {
+        ...result,
+        logFile,
+      };
+    } catch (error) {
+      await saveSessionBestEffort(store, {
+        ...completedSession,
+        logFile,
+      });
+      throw error;
+    }
   } finally {
     runningChats.delete(chatKey);
+  }
+}
+
+async function saveSessionBestEffort(store: SessionStore, session: AgentSession): Promise<void> {
+  try {
+    await store.save(session);
+  } catch {
+    // Cleanup must not hide the original error.
   }
 }
