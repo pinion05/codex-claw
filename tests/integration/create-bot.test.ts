@@ -149,4 +149,31 @@ describe("createBotHandlers", () => {
     expect(startTyping).toHaveBeenCalledTimes(1);
     expect(stopTyping).toHaveBeenCalledTimes(1);
   });
+
+  test("stops typing before sending the reply message", async () => {
+    const events: string[] = [];
+    const handlers = createBotHandlers({
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn: mock(async () => ({ summary: "done" })),
+    });
+
+    await handlers.onText({
+      chatId: 123n,
+      text: "hello",
+      startTyping: async () => {
+        events.push("start");
+
+        return async () => {
+          events.push("stop");
+        };
+      },
+      reply: async (value: string) => {
+        events.push(`reply:${value}`);
+      },
+    });
+
+    expect(events).toEqual(["start", "stop", "reply:done"]);
+  });
 });

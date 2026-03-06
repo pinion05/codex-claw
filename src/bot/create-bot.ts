@@ -37,6 +37,21 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
   return {
     async onText({ chatId, text, startTyping, reply }: BotTextInput): Promise<void> {
       const stopTyping = await startTyping?.();
+      let typingStopped = false;
+
+      const stopTypingOnce = async () => {
+        if (typingStopped) {
+          return;
+        }
+
+        typingStopped = true;
+        await stopTyping?.();
+      };
+
+      const replyAfterStoppingTyping = async (value: string) => {
+        await stopTypingOnce();
+        await reply(value);
+      };
 
       try {
         const command = parseCommand(text);
@@ -45,16 +60,16 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
           switch (command.name) {
             case "start":
             case "help":
-              await reply(buildHelpMessage());
+              await replyAfterStoppingTyping(buildHelpMessage());
               return;
             case "status":
-              await reply(await deps.getStatusMessage(chatId));
+              await replyAfterStoppingTyping(await deps.getStatusMessage(chatId));
               return;
             case "reset":
-              await reply(formatResetMessage(await deps.resetSession(chatId)));
+              await replyAfterStoppingTyping(formatResetMessage(await deps.resetSession(chatId)));
               return;
             case "abort": {
-              await reply(formatAbortMessage(await deps.abortRun(chatId)));
+              await replyAfterStoppingTyping(formatAbortMessage(await deps.abortRun(chatId)));
               return;
             }
           }
@@ -62,18 +77,18 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
 
         try {
           const result = await deps.runTurn(chatId, text);
-          await reply(formatRunCompletedMessage(result.summary ?? null));
+          await replyAfterStoppingTyping(formatRunCompletedMessage(result.summary ?? null));
         } catch (error) {
           if (isAbortError(error)) {
-            await reply(formatRunAbortedMessage());
+            await replyAfterStoppingTyping(formatRunAbortedMessage());
             return;
           }
 
           const message = error instanceof Error ? error.message : String(error);
-          await reply(formatRunFailedMessage(message));
+          await replyAfterStoppingTyping(formatRunFailedMessage(message));
         }
       } finally {
-        await stopTyping?.();
+        await stopTypingOnce();
       }
     },
   };
