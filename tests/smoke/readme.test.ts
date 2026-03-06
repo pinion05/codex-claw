@@ -17,5 +17,10 @@ describe("README", () => {
     expect(readme).toContain("/help");
     expect(readme).toContain("~/.codex-claw/workspace");
     expect(readme).toContain("fixed workspace");
+    expect(readme).toContain("## Publishing");
+    expect(readme).toContain("bun run check");
+    expect(readme).toContain("bun run publish:dry-run");
+    expect(readme).toContain("bun run publish:npm");
+    expect(readme).toContain("bun pm whoami");
   });
 });

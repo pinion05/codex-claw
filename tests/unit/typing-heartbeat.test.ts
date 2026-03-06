@@ -30,6 +30,7 @@ describe("createTypingHeartbeat", () => {
 
     scheduled.values().next().value?.();
     await Promise.resolve();
+    await Promise.resolve();
     expect(sendTyping).toHaveBeenCalledTimes(2);
 
     stopTyping();
@@ -53,5 +54,39 @@ describe("createTypingHeartbeat", () => {
 
     expect(sendTyping).toHaveBeenCalledTimes(1);
     stopTyping();
+  });
+
+  test("waits for an in-flight typing request to settle before stopping", async () => {
+    let resolveTyping!: () => void;
+    const sendTyping = mock(
+      async () =>
+        await new Promise<void>((resolve) => {
+          resolveTyping = resolve;
+        }),
+    );
+
+    const stopTyping = createTypingHeartbeat({
+      sendTyping,
+      intervalMs: 4000,
+      timers: {
+        setInterval: () => 1,
+        clearInterval: () => undefined,
+      },
+    });
+
+    const stopPromise = Promise.resolve(stopTyping());
+    let settled = false;
+    void stopPromise.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(sendTyping).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+
+    resolveTyping();
+    await stopPromise;
+
+    expect(settled).toBe(true);
   });
 });

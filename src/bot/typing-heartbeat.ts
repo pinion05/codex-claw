@@ -20,17 +20,33 @@ export function createTypingHeartbeat<Handle = ReturnType<typeof globalThis.setI
       setInterval: globalThis.setInterval.bind(globalThis),
       clearInterval: globalThis.clearInterval.bind(globalThis),
     } as unknown) as TimerApi<Handle>);
+  let stopped = false;
+  const runTyping = async () => {
+    if (stopped) {
+      return;
+    }
+
+    await Promise.resolve(sendTyping()).catch(() => undefined);
+  };
+  let inFlight = runTyping();
+
   const heartbeat = () => {
-    void Promise.resolve(sendTyping()).catch(() => undefined);
+    if (stopped) {
+      return inFlight;
+    }
+
+    inFlight = inFlight.then(runTyping);
+
+    return inFlight;
   };
 
-  heartbeat();
-
   const intervalId = resolvedTimers.setInterval(() => {
-    heartbeat();
+    void heartbeat();
   }, intervalMs);
 
-  return () => {
+  return async () => {
+    stopped = true;
     resolvedTimers.clearInterval(intervalId);
+    await inFlight;
   };
 }
