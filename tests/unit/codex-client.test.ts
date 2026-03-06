@@ -3,7 +3,8 @@ import { createCodexClient } from "../../src/codex/codex-client";
 
 describe("createCodexClient", () => {
   test("starts a thread when no thread exists", async () => {
-    const startThread = mock(() => Promise.resolve({ id: "thread_new" }));
+    const startedThread = { id: "thread_new" };
+    const startThread = mock(() => Promise.resolve(startedThread));
     const runPrompt = mock(() =>
       Promise.resolve({ summary: "done", touchedPaths: [] }),
     );
@@ -16,6 +17,7 @@ describe("createCodexClient", () => {
     const result = await client.runTurn({ threadId: null, prompt: "hello" });
 
     expect(startThread).toHaveBeenCalled();
+    expect(runPrompt).toHaveBeenCalledWith(startedThread, "hello");
     expect(result.threadId).toBe("thread_new");
   });
 
@@ -42,6 +44,29 @@ describe("createCodexClient", () => {
     expect(result).toEqual({
       threadId: "thread_existing",
       summary: "continued",
+      touchedPaths: ["src/codex/codex-client.ts"],
+    });
+  });
+
+  test("normalizes invalid sdk results into the internal result shape", async () => {
+    const startThread = mock(() => Promise.resolve({ id: "thread_new" }));
+    const runPrompt = mock(() =>
+      Promise.resolve({
+        summary: null,
+        touchedPaths: ["src/codex/codex-client.ts", null, 42],
+      }),
+    );
+    const client = createCodexClient({
+      startThread,
+      resumeThread: mock(),
+      runPrompt,
+    });
+
+    const result = await client.runTurn({ threadId: null, prompt: "hello" });
+
+    expect(result).toEqual({
+      threadId: "thread_new",
+      summary: "",
       touchedPaths: ["src/codex/codex-client.ts"],
     });
   });

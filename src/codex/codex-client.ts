@@ -5,8 +5,8 @@ type CodexThread = {
 };
 
 type CodexPromptResult = {
-  summary: string;
-  touchedPaths: string[];
+  summary?: unknown;
+  touchedPaths?: unknown;
 };
 
 type CodexClientDeps = {
@@ -14,6 +14,18 @@ type CodexClientDeps = {
   resumeThread: (threadId: string) => Promise<CodexThread>;
   runPrompt: (thread: CodexThread, prompt: string) => Promise<CodexPromptResult>;
 };
+
+function normalizeSummary(summary: unknown): string {
+  return typeof summary === "string" ? summary : "";
+}
+
+function normalizeTouchedPaths(touchedPaths: unknown): string[] {
+  if (!Array.isArray(touchedPaths)) {
+    return [];
+  }
+
+  return touchedPaths.filter((path): path is string => typeof path === "string");
+}
 
 export function createCodexClient({
   startThread,
@@ -28,8 +40,8 @@ export function createCodexClient({
 
       return {
         threadId: thread.id,
-        summary: result.summary,
-        touchedPaths: result.touchedPaths,
+        summary: normalizeSummary(result.summary),
+        touchedPaths: normalizeTouchedPaths(result.touchedPaths),
       };
     },
   };
