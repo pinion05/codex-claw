@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { FileSessionStore } from "../../src/session/session-store";
-import * as loggingModule from "../../src/runtime/logging";
+import { createRunLogger } from "../../src/runtime/logging";
 import { runAgentTurn } from "../../src/runtime/run-agent-turn";
 
 describe("runAgentTurn", () => {
@@ -16,15 +16,6 @@ describe("runAgentTurn", () => {
         touchedPaths: ["/tmp/demo.txt"],
       })),
     };
-    const createRunLogger = (
-      loggingModule as {
-        createRunLogger?: (workspaceDir: string) => {
-          writeRunLog: (payload: loggingModule.RunLogPayload) => Promise<string>;
-        };
-      }
-    ).createRunLogger;
-
-    expect(createRunLogger).toBeDefined();
 
     try {
       const store = new FileSessionStore(workspaceDir);
@@ -33,7 +24,7 @@ describe("runAgentTurn", () => {
         prompt: "do the thing",
         store,
         codex,
-        logger: createRunLogger!(workspaceDir),
+        logger: createRunLogger(workspaceDir),
       });
       const session = await store.getOrCreate(123n);
       const completedAt = new Date(session.lastCompletedAt!);
@@ -44,16 +35,19 @@ describe("runAgentTurn", () => {
         (completedAt.getUTCMonth() + 1).toString().padStart(2, "0"),
         completedAt.getUTCDate().toString().padStart(2, "0"),
       );
-      const logEntry = JSON.parse(readFileSync(result.logFile, "utf8")) as Record<string, unknown>;
+      expect(result.logFile).not.toBeNull();
+      const logFile = result.logFile!;
+      const logEntry = JSON.parse(readFileSync(logFile, "utf8")) as Record<string, unknown>;
 
       expect(result.summary).toBe("done");
-      expect(path.dirname(result.logFile)).toBe(expectedLogDir);
+      expect(path.dirname(logFile)).toBe(expectedLogDir);
+      expect(path.basename(logFile)).not.toContain(":");
       expect(session).toMatchObject({
         chatId: "123",
         threadId: "thread_1",
         isRunning: false,
         lastSummary: "done",
-        logFile: result.logFile,
+        logFile,
       });
       expect(logEntry).toMatchObject({
         chatId: "123",
@@ -107,6 +101,76 @@ describe("runAgentTurn", () => {
     expect(writeRunLog).not.toHaveBeenCalled();
   });
 
+  test("rejects a second in-process turn for the same chat while the first is running", async () => {
+    let releaseFirstTurn!: () => void;
+    const firstTurnStarted = new Promise<void>((resolve) => {
+      releaseFirstTurn = resolve;
+    });
+    let continueFirstTurn!: () => void;
+    const firstTurnCanFinish = new Promise<void>((resolve) => {
+      continueFirstTurn = resolve;
+    });
+    const store = {
+      getOrCreate: mock(async () => ({
+        chatId: "123",
+        threadId: null,
+        isRunning: false,
+        lastStartedAt: null,
+        lastCompletedAt: null,
+        lastSummary: null,
+        logFile: null,
+      })),
+      save: mock(async () => undefined),
+    };
+    let codexCalls = 0;
+    const codex = {
+      runTurn: mock(async () => {
+        codexCalls += 1;
+
+        if (codexCalls > 1) {
+          throw new Error("second codex call should not happen");
+        }
+
+        releaseFirstTurn();
+        await firstTurnCanFinish;
+
+        return {
+          threadId: "thread_1",
+          summary: "done",
+          touchedPaths: [],
+        };
+      }),
+    };
+    const logger = { writeRunLog: mock(async () => "/tmp/log.json") };
+
+    const firstTurn = runAgentTurn({
+      chatId: 123n,
+      prompt: "do the thing",
+      store,
+      codex,
+      logger,
+    });
+    await firstTurnStarted;
+
+    await expect(
+      runAgentTurn({
+        chatId: 123n,
+        prompt: "do the thing again",
+        store,
+        codex,
+        logger,
+      }),
+    ).rejects.toThrow("Session for chat 123 is already running");
+
+    continueFirstTurn();
+
+    await expect(firstTurn).resolves.toMatchObject({
+      threadId: "thread_1",
+      summary: "done",
+    });
+    expect(codex.runTurn).toHaveBeenCalledTimes(1);
+  });
+
   test("clears running state and rethrows when codex fails", async () => {
     const saved: unknown[] = [];
     const store = {
@@ -158,7 +222,7 @@ describe("runAgentTurn", () => {
     );
   });
 
-  test("clears running state when log writing fails", async () => {
+  test("returns success when codex succeeds but log writing fails", async () => {
     const saved: unknown[] = [];
     const store = {
       getOrCreate: mock(async () => ({
@@ -185,15 +249,13 @@ describe("runAgentTurn", () => {
       throw new Error("log failed");
     });
 
-    await expect(
-      runAgentTurn({
-        chatId: 123n,
-        prompt: "do the thing",
-        store,
-        codex,
-        logger: { writeRunLog },
-      }),
-    ).rejects.toThrow("log failed");
+    const result = await runAgentTurn({
+      chatId: 123n,
+      prompt: "do the thing",
+      store,
+      codex,
+      logger: { writeRunLog },
+    });
 
     expect(saved.length).toBe(2);
     expect(saved[1]).toMatchObject({
@@ -202,6 +264,11 @@ describe("runAgentTurn", () => {
       isRunning: false,
       lastSummary: "done",
       logFile: null,
+    });
+    expect(result).toMatchObject({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: ["/tmp/demo.txt"],
     });
   });
 });

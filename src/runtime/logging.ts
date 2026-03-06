@@ -32,7 +32,8 @@ export async function writeRunLog({
   const month = (completedDate.getUTCMonth() + 1).toString().padStart(2, "0");
   const day = completedDate.getUTCDate().toString().padStart(2, "0");
   const directory = path.join(workspaceDir, "logs", year, month, day);
-  const filePath = path.join(directory, `${completedAt}-${randomUUID()}.json`);
+  const safeTimestamp = completedAt.replaceAll(":", "-");
+  const filePath = path.join(directory, `${safeTimestamp}-${randomUUID()}.json`);
 
   await mkdir(directory, { recursive: true });
   await writeFile(
