@@ -1,7 +1,28 @@
 {
   "name": "codex-claw",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Telegram-native Codex agent harness for Bun",
+  "private": false,
   "type": "module",
+  "bin": {
+    "codex-claw": "./bin/codex-claw"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pinion05/codex-claw.git"
+  },
+  "homepage": "https://github.com/pinion05/codex-claw#readme",
+  "bugs": {
+    "url": "https://github.com/pinion05/codex-claw/issues"
+  },
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
