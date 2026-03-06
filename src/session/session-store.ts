@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentSession } from "./session-types";
 
@@ -11,8 +12,15 @@ export class FileSessionStore {
 
   async getOrCreate(chatId: bigint): Promise<AgentSession> {
     const session = await this.read();
+    const requestedChatId = chatId.toString();
 
     if (session) {
+      if (session.chatId !== requestedChatId) {
+        throw new Error(
+          `Stored session chatId ${session.chatId} does not match requested chatId ${requestedChatId}`,
+        );
+      }
+
       return session;
     }
 
@@ -22,8 +30,18 @@ export class FileSessionStore {
   }
 
   async save(session: AgentSession): Promise<void> {
-    await mkdir(path.dirname(this.sessionPath), { recursive: true });
-    await writeFile(this.sessionPath, JSON.stringify(session, null, 2));
+    const directory = path.dirname(this.sessionPath);
+    const tempPath = path.join(directory, `${path.basename(this.sessionPath)}.${randomUUID()}.tmp`);
+
+    await mkdir(directory, { recursive: true });
+
+    try {
+      await writeFile(tempPath, JSON.stringify(session, null, 2));
+      await rename(tempPath, this.sessionPath);
+    } catch (error) {
+      await rm(tempPath, { force: true });
+      throw error;
+    }
   }
 
   async reset(chatId: bigint): Promise<void> {
@@ -45,10 +63,19 @@ export class FileSessionStore {
   private async read(): Promise<AgentSession | null> {
     try {
       const content = await readFile(this.sessionPath, "utf8");
-      return JSON.parse(content) as AgentSession;
+      const parsed = JSON.parse(content) as unknown;
+      return parseAgentSession(parsed, this.sessionPath);
     } catch (error) {
       if (isMissingFileError(error)) {
         return null;
+      }
+
+      if (error instanceof SyntaxError) {
+        throw new Error(`Invalid session file at ${this.sessionPath}: failed to parse JSON`);
+      }
+
+      if (error instanceof InvalidSessionFileError) {
+        throw error;
       }
 
       throw error;
@@ -59,3 +86,37 @@ export class FileSessionStore {
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
+
+function parseAgentSession(value: unknown, sessionPath: string): AgentSession {
+  if (!isAgentSession(value)) {
+    throw new InvalidSessionFileError(
+      `Invalid session file at ${sessionPath}: expected AgentSession shape`,
+    );
+  }
+
+  return value;
+}
+
+function isAgentSession(value: unknown): value is AgentSession {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const session = value as Record<string, unknown>;
+
+  return (
+    typeof session.chatId === "string" &&
+    isNullableString(session.threadId) &&
+    typeof session.isRunning === "boolean" &&
+    isNullableString(session.lastStartedAt) &&
+    isNullableString(session.lastCompletedAt) &&
+    isNullableString(session.lastSummary) &&
+    isNullableString(session.logFile)
+  );
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+class InvalidSessionFileError extends Error {}
