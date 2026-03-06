@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { loadConfig } from "../../src/config";
 import { resolveWorkspaceDir } from "../../src/lib/paths";
 
@@ -10,6 +11,20 @@ describe("resolveWorkspaceDir", () => {
 
   test("uses CODEX_WORKSPACE_DIR when provided", () => {
     expect(resolveWorkspaceDir({ CODEX_WORKSPACE_DIR: "/tmp/claw" })).toBe("/tmp/claw");
+  });
+
+  test("falls back to the default workspace when override is an empty string", () => {
+    const value = resolveWorkspaceDir({ CODEX_WORKSPACE_DIR: "" });
+    expect(value.endsWith("/.codex-claw/workspace")).toBe(true);
+  });
+
+  test("falls back to the default workspace when override is whitespace only", () => {
+    const value = resolveWorkspaceDir({ CODEX_WORKSPACE_DIR: "   " });
+    expect(value.endsWith("/.codex-claw/workspace")).toBe(true);
+  });
+
+  test("normalizes a relative CODEX_WORKSPACE_DIR to an absolute path", () => {
+    expect(resolveWorkspaceDir({ CODEX_WORKSPACE_DIR: "tmp/claw" })).toBe(path.resolve("tmp/claw"));
   });
 });
 
