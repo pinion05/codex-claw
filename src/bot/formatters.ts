@@ -25,10 +25,10 @@ export function formatRunCompletedMessage(summary?: string | null): string {
   const detail = collapseInline(summary);
 
   if (detail.length === 0) {
-    return "Run completed.";
+    return "NULL";
   }
 
-  return `Run completed. Summary: ${detail}`;
+  return detail;
 }
 
 export function formatRunAbortedMessage(): string {
