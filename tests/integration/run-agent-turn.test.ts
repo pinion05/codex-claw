@@ -1,24 +1,14 @@
 import { describe, expect, mock, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { FileSessionStore } from "../../src/session/session-store";
+import * as loggingModule from "../../src/runtime/logging";
 import { runAgentTurn } from "../../src/runtime/run-agent-turn";
 
 describe("runAgentTurn", () => {
-  test("marks the session running, calls codex, then saves the summary", async () => {
-    const saved: unknown[] = [];
-    const store = {
-      getOrCreate: mock(async () => ({
-        chatId: "123",
-        threadId: null,
-        isRunning: false,
-        lastStartedAt: null,
-        lastCompletedAt: null,
-        lastSummary: null,
-        logFile: null,
-      })),
-      save: mock(async (value) => {
-        saved.push(value);
-      }),
-    };
-
+  test("persists session state and writes a dated JSON log on success", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-run-agent-turn-"));
     const codex = {
       runTurn: mock(async () => ({
         threadId: "thread_1",
@@ -26,17 +16,58 @@ describe("runAgentTurn", () => {
         touchedPaths: ["/tmp/demo.txt"],
       })),
     };
+    const createRunLogger = (
+      loggingModule as {
+        createRunLogger?: (workspaceDir: string) => {
+          writeRunLog: (payload: loggingModule.RunLogPayload) => Promise<string>;
+        };
+      }
+    ).createRunLogger;
 
-    const result = await runAgentTurn({
-      chatId: 123n,
-      prompt: "do the thing",
-      store,
-      codex,
-      logger: { writeRunLog: mock(async () => "/tmp/log.json") },
-    });
+    expect(createRunLogger).toBeDefined();
 
-    expect(result.summary).toBe("done");
-    expect(saved.length).toBeGreaterThan(1);
+    try {
+      const store = new FileSessionStore(workspaceDir);
+      const result = await runAgentTurn({
+        chatId: 123n,
+        prompt: "do the thing",
+        store,
+        codex,
+        logger: createRunLogger!(workspaceDir),
+      });
+      const session = await store.getOrCreate(123n);
+      const completedAt = new Date(session.lastCompletedAt!);
+      const expectedLogDir = path.join(
+        workspaceDir,
+        "logs",
+        completedAt.getUTCFullYear().toString().padStart(4, "0"),
+        (completedAt.getUTCMonth() + 1).toString().padStart(2, "0"),
+        completedAt.getUTCDate().toString().padStart(2, "0"),
+      );
+      const logEntry = JSON.parse(readFileSync(result.logFile, "utf8")) as Record<string, unknown>;
+
+      expect(result.summary).toBe("done");
+      expect(path.dirname(result.logFile)).toBe(expectedLogDir);
+      expect(session).toMatchObject({
+        chatId: "123",
+        threadId: "thread_1",
+        isRunning: false,
+        lastSummary: "done",
+        logFile: result.logFile,
+      });
+      expect(logEntry).toMatchObject({
+        chatId: "123",
+        prompt: "do the thing",
+        threadId: "thread_1",
+        summary: "done",
+        touchedPaths: ["/tmp/demo.txt"],
+        status: "completed",
+        error: null,
+      });
+      expect(logEntry.completedAt).toBe(session.lastCompletedAt);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
   });
 
   test("rejects when the session is already running", async () => {

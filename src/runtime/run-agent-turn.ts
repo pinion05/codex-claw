@@ -1,6 +1,6 @@
 import type { CodexRunRequest, CodexRunResult } from "../codex/codex-types";
 import type { AgentSession } from "../session/session-types";
-import type { RunLogPayload } from "./logging";
+import type { RunLogPayload, RunLogger } from "./logging";
 
 type SessionStore = {
   getOrCreate: (chatId: bigint) => Promise<AgentSession>;
@@ -9,10 +9,6 @@ type SessionStore = {
 
 type CodexClient = {
   runTurn: (request: CodexRunRequest) => Promise<CodexRunResult>;
-};
-
-type RunLogger = {
-  writeRunLog: (payload: RunLogPayload) => Promise<string>;
 };
 
 export type RunAgentTurnArgs = {

@@ -14,6 +14,10 @@ export type RunLogPayload = {
   error: { message: string } | null;
 };
 
+export type RunLogger = {
+  writeRunLog: (payload: RunLogPayload) => Promise<string>;
+};
+
 export type WriteRunLogInput = RunLogPayload & {
   workspaceDir: string;
 };
@@ -44,4 +48,15 @@ export async function writeRunLog({
   );
 
   return filePath;
+}
+
+export function createRunLogger(workspaceDir: string): RunLogger {
+  return {
+    writeRunLog(payload) {
+      return writeRunLog({
+        workspaceDir,
+        ...payload,
+      });
+    },
+  };
 }
