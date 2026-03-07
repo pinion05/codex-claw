@@ -16,7 +16,7 @@ describe("package metadata", () => {
   test("is ready for public npm publication", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as PackageJson;
 
-    expect(packageJson.name).toBe("codex-claw");
+    expect(packageJson.name).toBe("@npmc_5/codex-claw");
     expect(typeof packageJson.version).toBe("string");
     expect(packageJson.private).toBe(false);
     expect(packageJson.bin).toEqual({
