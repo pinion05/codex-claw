@@ -1,3 +1,8 @@
 #!/usr/bin/env bun
 
-import "../src/index.ts";
+import { main } from "../src/index.ts";
+
+await main().catch((error) => {
+  console.error("[codex-claw] fatal startup error", error);
+  process.exitCode = 1;
+});

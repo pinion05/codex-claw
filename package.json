@@ -1,6 +1,6 @@
 {
   "name": "@npmc_5/codex-claw",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Telegram-native Codex agent harness for Bun",
   "license": "MIT",
   "private": false,
