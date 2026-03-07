@@ -19,13 +19,7 @@ This bot runs locally on your machine and connects one Telegram chat to one pers
 
 ## Setup
 
-1. Install dependencies.
-
-```bash
-bun install
-```
-
-2. Authenticate the local Codex CLI.
+1. Authenticate the local Codex CLI.
 
 ```bash
 codex login
@@ -33,19 +27,15 @@ codex login
 
 This project reuses the local Codex CLI authentication by default.
 
-3. Run the local checks.
+2. Start the bot directly with `bunx`.
 
 ```bash
-bun run check
+bunx @npmc_5/codex-claw
 ```
 
-4. Start the bot.
+`bunx` downloads the published CLI and runs it immediately, so no separate install step is required.
 
-```bash
-bun run dev
-```
-
-On first start, if no Telegram bot token has been saved yet, the app will prompt:
+3. On first start, if no Telegram bot token has been saved yet, the app will prompt:
 
 ```text
 TELEGRAM_BOT_TOKEN을 입력하세요:
@@ -53,12 +43,6 @@ TELEGRAM_BOT_TOKEN을 입력하세요:
 
 After you enter it once, the value is saved to `~/.codex-claw/local-config.json` and reused on later runs.
 No separate configuration file is required for normal usage.
-
-For a non-watch run, use:
-
-```bash
-bun run start
-```
 
 ## Telegram Usage
 
@@ -103,13 +87,10 @@ This workspace is the bot's operational home and contains things like:
 
 The fixed operational workspace stores local state and logs under predictable paths, but the agent is not restricted to that directory for user-requested work. When Codex decides it needs to inspect or modify files outside that workspace, it may still read and write outside that workspace.
 
-## Local Development
+## Repository Maintenance
 
-- `bun run dev` starts the Telegram bot with file watching.
-- `bun run start` starts the bot once without watch mode.
-- `bun run check` runs the full verification suite.
-- `bun run typecheck` runs the TypeScript typecheck.
-- `bun test` runs the unit, integration, and smoke tests.
+This README intentionally documents the published `bunx` flow.
+Repository checks and release steps remain in `package.json` scripts.
 
 ## Publishing
 

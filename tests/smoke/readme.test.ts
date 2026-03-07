@@ -7,6 +7,7 @@ describe("README", () => {
 
     expect(readme).toContain("TELEGRAM_BOT_TOKEN");
     expect(readme).toContain("codex login");
+    expect(readme).toContain("bunx @npmc_5/codex-claw");
     expect(readme).toContain("local-config.json");
     expect(readme).toContain("입력하세요");
     expect(readme).toContain("/status");
@@ -20,6 +21,7 @@ describe("README", () => {
     expect(readme).toContain("bun run publish:dry-run");
     expect(readme).toContain("bun run publish:npm");
     expect(readme).toContain("bun pm whoami");
+    expect(readme).not.toContain("bun install");
     expect(readme).not.toContain("OPENAI_API_KEY");
     expect(readme).not.toContain("CODEX_WORKSPACE_DIR");
     expect(readme).not.toContain(".env.example");
