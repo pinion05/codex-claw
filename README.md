@@ -25,13 +25,7 @@ This bot runs locally on your machine and connects one Telegram chat to one pers
 bun install
 ```
 
-2. Copy `.env.example` to `.env`.
-
-```bash
-cp .env.example .env
-```
-
-3. Authenticate the local Codex CLI.
+2. Authenticate the local Codex CLI.
 
 ```bash
 codex login
@@ -39,48 +33,26 @@ codex login
 
 This project reuses the local Codex CLI authentication by default.
 
-4. Choose how to provide the Telegram bot token.
-
-Option A: let `bun run dev` ask for it on first start.
-
-- If `TELEGRAM_BOT_TOKEN` is not set in env or `.env`, the app prompts in the terminal.
-- The entered token is saved in `~/.codex-claw/local-config.json`.
-- On later runs, that saved token is reused until you override it with an env value.
-
-Option B: pre-fill `.env` yourself.
-
-```dotenv
-TELEGRAM_BOT_TOKEN=123456:your-telegram-bot-token
-# Optional override if you do not want to reuse local `codex login`
-OPENAI_API_KEY=
-CODEX_WORKSPACE_DIR=
-```
-
-- `TELEGRAM_BOT_TOKEN`: optional if you want interactive first-run setup
-- `OPENAI_API_KEY`: optional override
-  If left empty, the SDK reuses your local Codex CLI authentication.
-- `CODEX_WORKSPACE_DIR`: optional
-  If omitted or left blank, the bot uses `~/.codex-claw/workspace`.
-
-5. Run the local checks.
+3. Run the local checks.
 
 ```bash
 bun run check
 ```
 
-6. Start the bot.
+4. Start the bot.
 
 ```bash
 bun run dev
 ```
 
-If no Telegram token is configured yet, the app will prompt:
+On first start, if no Telegram bot token has been saved yet, the app will prompt:
 
 ```text
 TELEGRAM_BOT_TOKEN을 입력하세요:
 ```
 
-After you enter it once, the value is reused from `~/.codex-claw/local-config.json`.
+After you enter it once, the value is saved to `~/.codex-claw/local-config.json` and reused on later runs.
+No separate configuration file is required for normal usage.
 
 For a non-watch run, use:
 
@@ -122,7 +94,7 @@ Notes:
 
 ## Runtime Model
 
-`codex-claw` uses a fixed workspace at `~/.codex-claw/workspace` by default. You can override that location with `CODEX_WORKSPACE_DIR`.
+`codex-claw` uses a fixed workspace at `~/.codex-claw/workspace` by default.
 
 This workspace is the bot's operational home and contains things like:
 

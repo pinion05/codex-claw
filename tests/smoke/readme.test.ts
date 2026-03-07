@@ -2,13 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 describe("README", () => {
-  test("documents auth setup, env vars, and bot commands", () => {
+  test("documents the prompt-first setup flow and bot commands", () => {
     const readme = readFileSync("README.md", "utf8");
 
     expect(readme).toContain("TELEGRAM_BOT_TOKEN");
-    expect(readme).toContain("OPENAI_API_KEY");
     expect(readme).toContain("codex login");
-    expect(readme).toContain("CODEX_WORKSPACE_DIR");
     expect(readme).toContain("local-config.json");
     expect(readme).toContain("입력하세요");
     expect(readme).toContain("/status");
@@ -22,5 +20,8 @@ describe("README", () => {
     expect(readme).toContain("bun run publish:dry-run");
     expect(readme).toContain("bun run publish:npm");
     expect(readme).toContain("bun pm whoami");
+    expect(readme).not.toContain("OPENAI_API_KEY");
+    expect(readme).not.toContain("CODEX_WORKSPACE_DIR");
+    expect(readme).not.toContain(".env.example");
   });
 });

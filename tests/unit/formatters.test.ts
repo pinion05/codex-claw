@@ -28,9 +28,9 @@ describe("run lifecycle formatters", () => {
     expect(text).toContain("thread_1");
   });
 
-  test("collapses multiline summaries into concise completion text", () => {
+  test("preserves multiline summaries for completion text", () => {
     expect(formatRunCompletedMessage("done\n\nwith follow-up details")).toBe(
-      "done with follow-up details",
+      "done\n\nwith follow-up details",
     );
   });
 
@@ -38,9 +38,9 @@ describe("run lifecycle formatters", () => {
     expect(formatRunCompletedMessage(null)).toBe("NULL");
   });
 
-  test("collapses multiline errors into concise failure text", () => {
+  test("preserves multiline errors in failure text", () => {
     expect(formatRunFailedMessage("boom\n  at task.ts:1\n  at worker.ts:2")).toBe(
-      "Run failed. Error: boom at task.ts:1 at worker.ts:2",
+      "Run failed. Error:\nboom\n  at task.ts:1\n  at worker.ts:2",
     );
   });
 });
