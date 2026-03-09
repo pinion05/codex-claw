@@ -12,9 +12,13 @@ describe("installCronjobCreatorSkill", () => {
 
     try {
       const installedPath = await installCronjobCreatorSkill({ codexHomeDir });
+      const installedSkill = readFileSync(installedPath, "utf8");
 
       expect(statSync(installedPath).isFile()).toBe(true);
-      expect(readFileSync(installedPath, "utf8")).toContain("# codex-claw-cronjob-creator");
+      expect(installedSkill.startsWith("---\n")).toBe(true);
+      expect(installedSkill).toContain("name: codex-claw-cronjob-creator");
+      expect(installedSkill).toContain("description:");
+      expect(installedSkill).toContain("# codex-claw-cronjob-creator");
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
