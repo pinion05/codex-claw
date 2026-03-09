@@ -104,7 +104,13 @@ export function createCronRuntime({
   }
 
   async function start(): Promise<RefreshReport> {
-    const report = await tick();
+    const report = await refresh();
+
+    try {
+      await scheduler.tick();
+    } catch (error) {
+      reportBackgroundError(error);
+    }
 
     timer = setIntervalFn(() => {
       void tick().catch(reportBackgroundError);

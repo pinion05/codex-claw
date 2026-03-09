@@ -81,4 +81,43 @@ describe("createCronRuntime dispatch", () => {
     expect(onBackgroundError).toHaveBeenCalledTimes(1);
     expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
   });
+
+  test("does not fail startup when the initial scheduler tick fails", async () => {
+    let intervalCallback: (() => void) | undefined;
+    const onBackgroundError = mock((_error: unknown) => undefined);
+    const scheduler = {
+      upsert() {},
+      remove() {},
+      listJobIds() {
+        return [];
+      },
+      async tick() {
+        throw new Error("initial tick failed");
+      },
+      stopAll() {},
+      getDueJobs() {
+        return [];
+      },
+    };
+
+    const runtime = createCronRuntime({
+      scheduler,
+      dispatchPrompt: async () => undefined,
+      setIntervalFn: ((callback: () => void) => {
+        intervalCallback = callback;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      }) as typeof setInterval,
+      clearIntervalFn: (() => undefined) as typeof clearInterval,
+      onBackgroundError,
+    });
+
+    await expect(runtime.start()).resolves.toEqual({
+      registered: [],
+      skippedDisabled: [],
+      errors: [],
+    });
+    expect(intervalCallback).toBeDefined();
+    expect(onBackgroundError).toHaveBeenCalledTimes(1);
+    expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+  });
 });
