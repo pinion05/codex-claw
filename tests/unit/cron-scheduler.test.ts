@@ -43,13 +43,16 @@ describe("createScheduledJobScheduler", () => {
     expect(scheduler.getDueJobs([job], new Date(2027, 6, 11, 16, 0, 0))).toEqual([]);
   });
 
-  test("does not re-run the same job twice in the same minute", () => {
+  test("does not re-run the same job twice in the same minute", async () => {
     const scheduler = createScheduledJobScheduler();
     const job = createJob({ id: "daily-summary" });
-    const currentMinute = new Date(2027, 6, 11, 9, 0, 10);
+    const run = mock(async () => undefined);
+    scheduler.upsert(job, run);
 
-    expect(scheduler.getDueJobs([job], currentMinute).map((item) => item.id)).toEqual(["daily-summary"]);
-    expect(scheduler.getDueJobs([job], new Date(2027, 6, 11, 9, 0, 50))).toEqual([]);
+    await scheduler.tick(new Date(2027, 6, 11, 9, 0, 50));
+    await scheduler.tick(new Date(2027, 6, 11, 9, 0, 55));
+
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   test("does not perform catch-up runs for missed schedules", () => {
@@ -79,5 +82,45 @@ describe("createScheduledJobScheduler", () => {
     await expect(scheduler.tick(new Date(2027, 6, 11, 9, 0, 0))).rejects.toThrow("first failed");
     expect(firstRun).toHaveBeenCalledTimes(1);
     expect(secondRun).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries a failed job again within the same minute", async () => {
+    const scheduler = createScheduledJobScheduler();
+    const run = mock(async () => {
+      if (run.mock.calls.length === 1) {
+        throw new Error("temporary failure");
+      }
+    });
+
+    scheduler.upsert(createJob({ id: "retry-job" }), run);
+
+    await expect(scheduler.tick(new Date(2027, 6, 11, 9, 0, 0))).rejects.toThrow("temporary failure");
+    await expect(scheduler.tick(new Date(2027, 6, 11, 9, 0, 30))).resolves.toBeUndefined();
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  test("does not start the same job twice while the first run is still in flight", async () => {
+    const scheduler = createScheduledJobScheduler();
+    let releaseFirstRun: (() => void) | undefined;
+    const firstRunFinished = new Promise<void>((resolve) => {
+      releaseFirstRun = resolve;
+    });
+    const run = mock(async () => {
+      await firstRunFinished;
+    });
+
+    scheduler.upsert(createJob({ id: "in-flight-job" }), run);
+
+    const firstTick = scheduler.tick(new Date(2027, 6, 11, 9, 0, 0));
+    await Promise.resolve();
+    const secondTick = scheduler.tick(new Date(2027, 6, 11, 9, 0, 15));
+    await Promise.resolve();
+
+    expect(run).toHaveBeenCalledTimes(1);
+
+    releaseFirstRun?.();
+    await expect(firstTick).resolves.toBeUndefined();
+    await expect(secondTick).resolves.toBeUndefined();
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });

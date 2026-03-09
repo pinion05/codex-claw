@@ -74,4 +74,48 @@ describe("createCronRuntime one-shot flow", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  test("retries a failed one-shot again within the same minute and disables it after success", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-system-"));
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const sourcePath = path.join(cronjobsDir, "launch-reminder.json");
+    const dispatchPrompt = mock(async () => {
+      if (dispatchPrompt.mock.calls.length === 1) {
+        throw new Error("dispatch failed");
+      }
+    });
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        sourcePath,
+        JSON.stringify({
+          id: "launch-reminder",
+          date: "2027-07-12",
+          time: "16:00",
+          action: {
+            type: "message",
+            prompt: "Prepare the launch day checklist.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        dispatchPrompt,
+      });
+
+      await expect(runtime.tick(new Date(2027, 6, 12, 16, 0, 0))).rejects.toThrow("dispatch failed");
+      await expect(runtime.tick(new Date(2027, 6, 12, 16, 0, 30))).resolves.toEqual({
+        registered: [],
+        skippedDisabled: [],
+        errors: [],
+      });
+      expect(dispatchPrompt).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(readFileSync(sourcePath, "utf8")).disabled).toBe(true);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });

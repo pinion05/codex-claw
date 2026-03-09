@@ -34,6 +34,7 @@ function matchesScheduledMinute(spec: ScheduledJobSpec, date: Date): boolean {
 export function createScheduledJobScheduler() {
   const jobs = new Map<string, RegisteredJob>();
   const executedMinuteKeys = new Set<string>();
+  const runningMinuteKeys = new Set<string>();
 
   return {
     getDueJobs(specs: ScheduledJobSpec[], now = new Date()): ScheduledJobSpec[] {
@@ -46,11 +47,10 @@ export function createScheduledJobScheduler() {
 
         const minuteKey = getMinuteKey(spec, now);
 
-        if (executedMinuteKeys.has(minuteKey)) {
+        if (executedMinuteKeys.has(minuteKey) || runningMinuteKeys.has(minuteKey)) {
           continue;
         }
 
-        executedMinuteKeys.add(minuteKey);
         due.push(spec);
       }
 
@@ -79,10 +79,16 @@ export function createScheduledJobScheduler() {
           continue;
         }
 
+        const minuteKey = getMinuteKey(spec, now);
+        runningMinuteKeys.add(minuteKey);
+
         try {
           await registered.run();
+          executedMinuteKeys.add(minuteKey);
         } catch (error) {
           errors.push(error);
+        } finally {
+          runningMinuteKeys.delete(minuteKey);
         }
       }
 
@@ -97,6 +103,7 @@ export function createScheduledJobScheduler() {
     stopAll(): void {
       jobs.clear();
       executedMinuteKeys.clear();
+      runningMinuteKeys.clear();
     },
   };
 }
