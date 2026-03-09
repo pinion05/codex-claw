@@ -1,3 +1,8 @@
+---
+name: codex-claw-cronjob-creator
+description: Create or update codex-claw scheduled job definitions under ~/.codex-claw/cronjobs.
+---
+
 # codex-claw-cronjob-creator
 
 Create or update scheduled job definitions for `codex-claw`.
