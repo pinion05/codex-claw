@@ -9,6 +9,8 @@ This bot runs locally on your machine and connects one Telegram chat to one pers
 - Normal Telegram messages are sent to the current Codex thread.
 - The bot keeps the session alive between messages until you reset it.
 - Only one run is allowed at a time for the chat.
+- It can also run scheduled Codex message jobs from local JSON definitions.
+- On startup it installs a packaged Codex skill for creating those cronjob definitions.
 - The bot keeps an operational workspace for session state and logs, but it may still read or modify files outside that workspace if the request calls for it.
 
 ## Requirements
@@ -44,6 +46,14 @@ TELEGRAM_BOT_TOKEN을 입력하세요:
 After you enter it once, the value is saved to `~/.codex-claw/local-config.json` and reused on later runs.
 No separate configuration file is required for normal usage.
 
+On startup, the CLI also installs the packaged cronjob creator skill to:
+
+```text
+~/.codex/skills/codex-claw-cronjob-creator/SKILL.md
+```
+
+That skill can be used by Codex to create scheduled job definition files.
+
 ## Telegram Usage
 
 Once the process is running, open your bot in Telegram and send plain text instructions.
@@ -62,6 +72,40 @@ Example:
 1. `이 저장소 구조 파악해줘`
 2. `그럼 다음으로 테스트부터 돌려봐`
 3. `방금 수정한 내용 요약해줘`
+
+## Scheduled Jobs
+
+`codex-claw` can run scheduled Codex prompts from JSON definitions stored under:
+
+```text
+~/.codex-claw/cronjobs
+```
+
+Each job lives in its own file such as `~/.codex-claw/cronjobs/daily-summary.json`.
+
+Supported shape:
+
+```json
+{
+  "id": "daily-summary",
+  "time": "09:00",
+  "date": "2027-07-12",
+  "disabled": false,
+  "action": {
+    "type": "message",
+    "prompt": "Summarize yesterday's work."
+  }
+}
+```
+
+Notes:
+
+- `time` is required and must use `HH:mm`.
+- `date` is optional and must use `YYYY-MM-DD`.
+- If `date` is omitted, the job runs every day at that local time.
+- If `date` is present, the job runs once on that local date and time.
+- `action.type` is currently fixed to `"message"`.
+- Scheduled jobs run in fresh Codex threads, separate from the active Telegram chat thread.
 
 ## Commands
 
