@@ -40,6 +40,47 @@ describe("createCronRuntime loading", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  test("surfaces expired one-shot jobs instead of registering them", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-loader-"));
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "launch-reminder.json"),
+        JSON.stringify({
+          id: "launch-reminder",
+          date: "2027-07-12",
+          time: "16:00",
+          action: {
+            type: "message",
+            prompt: "Prepare the launch day checklist.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        dispatchPrompt: async () => undefined,
+      });
+
+      const report = await runtime.refresh(new Date(2027, 6, 12, 16, 1, 0));
+
+      expect(report.registered).toEqual([]);
+      expect(report.skippedDisabled).toEqual([]);
+      expect(report.errors).toEqual([
+        {
+          sourcePath: path.join(cronjobsDir, "launch-reminder.json"),
+          message: 'Scheduled one-shot job "launch-reminder" has expired',
+        },
+      ]);
+      expect(runtime.getRegisteredJobIds()).toEqual([]);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });
 
 describe("createRuntimeDeps cron wiring", () => {

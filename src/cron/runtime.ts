@@ -21,6 +21,17 @@ function createEmptyRefreshReport(): RefreshReport {
   };
 }
 
+function isExpiredOneShotJob(spec: ScheduledJobSpec, now: Date): boolean {
+  if (spec.date === null || spec.disabled) {
+    return false;
+  }
+
+  const [year, month, day] = spec.date.split("-").map((part) => Number(part));
+  const scheduledMinuteEndsAt = new Date(year, month - 1, day, spec.hour, spec.minute, 59, 999);
+
+  return now.getTime() > scheduledMinuteEndsAt.getTime();
+}
+
 export function createCronRuntime({
   codexClawHomeDir,
   dispatchPrompt,
@@ -94,34 +105,50 @@ export function createCronRuntime({
     };
   }
 
-  async function refresh(): Promise<RefreshReport> {
+  async function refresh(now = new Date()): Promise<RefreshReport> {
     const loaded = await loadSpecs();
-    const injected = injector.reconcile(loaded.specs);
+    const activeSpecs: ScheduledJobSpec[] = [];
+    const errors = [...loaded.errors];
+
+    for (const spec of loaded.specs) {
+      if (isExpiredOneShotJob(spec, now)) {
+        errors.push({
+          sourcePath: spec.sourcePath,
+          message: `Scheduled one-shot job "${spec.id}" has expired`,
+        });
+        continue;
+      }
+
+      activeSpecs.push(spec);
+    }
+
+    const injected = injector.reconcile(activeSpecs);
 
     return {
       registered: injected.registered,
       skippedDisabled: injected.skippedDisabled,
-      errors: [...loaded.errors, ...injected.errors],
+      errors: [...errors, ...injected.errors],
     };
   }
 
   async function tick(now = new Date()): Promise<RefreshReport> {
-    const report = await refresh();
+    const report = await refresh(now);
     await scheduler.tick(now);
     return report;
   }
 
   async function start(): Promise<RefreshReport> {
+    const now = new Date();
     let report = createEmptyRefreshReport();
 
     try {
-      report = await refresh();
+      report = await refresh(now);
     } catch (error) {
       reportBackgroundError(error);
     }
 
     try {
-      await scheduler.tick();
+      await scheduler.tick(now);
     } catch (error) {
       reportBackgroundError(error);
     }
