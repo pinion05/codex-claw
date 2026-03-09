@@ -6,6 +6,7 @@ type PackageJson = {
   version?: unknown;
   private?: unknown;
   bin?: unknown;
+  files?: unknown;
   publishConfig?: unknown;
   packageManager?: unknown;
   keywords?: unknown;
@@ -22,6 +23,9 @@ describe("package metadata", () => {
     expect(packageJson.bin).toEqual({
       "codex-claw": "bin/codex-claw",
     });
+    expect(packageJson.files).toEqual(
+      expect.arrayContaining(["bin", "src", "assets", "README.md", "LICENSE"]),
+    );
     expect(packageJson.publishConfig).toEqual({
       access: "public",
     });
