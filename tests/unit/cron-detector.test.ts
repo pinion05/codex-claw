@@ -7,7 +7,8 @@ import { detectScheduledJobDefinitions } from "../../src/cron/detector";
 describe("detectScheduledJobDefinitions", () => {
   test("detects only json definitions in stable path order", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-detector-"));
-    const cronjobsDir = path.join(root, ".codex-claw", "cronjobs");
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
 
     try {
       mkdirSync(cronjobsDir, { recursive: true });
@@ -21,7 +22,7 @@ describe("detectScheduledJobDefinitions", () => {
       );
       writeFileSync(path.join(cronjobsDir, "notes.txt"), "ignore me");
 
-      const result = await detectScheduledJobDefinitions({ codexClawHomeDir: root });
+      const result = await detectScheduledJobDefinitions({ codexClawHomeDir });
 
       expect(result.errors).toEqual([]);
       expect(result.definitions).toEqual([
@@ -41,7 +42,8 @@ describe("detectScheduledJobDefinitions", () => {
 
   test("surfaces invalid json and unreadable files as per-file errors", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-detector-"));
-    const cronjobsDir = path.join(root, ".codex-claw", "cronjobs");
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
     const unreadablePath = path.join(cronjobsDir, "unreadable.json");
 
     try {
@@ -50,7 +52,7 @@ describe("detectScheduledJobDefinitions", () => {
       writeFileSync(unreadablePath, JSON.stringify({ id: "hidden" }));
       chmodSync(unreadablePath, 0o000);
 
-      const result = await detectScheduledJobDefinitions({ codexClawHomeDir: root });
+      const result = await detectScheduledJobDefinitions({ codexClawHomeDir });
 
       expect(result.definitions).toEqual([]);
       expect(result.errors).toHaveLength(2);

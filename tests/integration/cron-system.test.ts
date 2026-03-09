@@ -7,7 +7,8 @@ import { createCronRuntime } from "../../src/cron/runtime";
 describe("createCronRuntime one-shot flow", () => {
   test("disables a one-shot job after successful execution", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-system-"));
-    const cronjobsDir = path.join(root, ".codex-claw", "cronjobs");
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
     const sourcePath = path.join(cronjobsDir, "launch-reminder.json");
 
     try {
@@ -26,7 +27,7 @@ describe("createCronRuntime one-shot flow", () => {
       );
 
       const runtime = createCronRuntime({
-        codexClawHomeDir: root,
+        codexClawHomeDir,
         dispatchPrompt: async () => undefined,
       });
 
@@ -40,7 +41,8 @@ describe("createCronRuntime one-shot flow", () => {
 
   test("keeps a one-shot job enabled when dispatch fails", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-system-"));
-    const cronjobsDir = path.join(root, ".codex-claw", "cronjobs");
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
     const sourcePath = path.join(cronjobsDir, "launch-reminder.json");
     const dispatchPrompt = mock(async () => {
       throw new Error("dispatch failed");
@@ -62,7 +64,7 @@ describe("createCronRuntime one-shot flow", () => {
       );
 
       const runtime = createCronRuntime({
-        codexClawHomeDir: root,
+        codexClawHomeDir,
         dispatchPrompt,
       });
 

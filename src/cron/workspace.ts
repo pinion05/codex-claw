@@ -3,7 +3,7 @@ import path from "node:path";
 import { resolveCodexClawHomeDir } from "../lib/paths";
 
 export function resolveCronJobsDir(homeDir = resolveCodexClawHomeDir()): string {
-  return path.join(homeDir, ".codex-claw", "cronjobs");
+  return path.join(homeDir, "cronjobs");
 }
 
 export async function ensureCronWorkspaceDirectories(

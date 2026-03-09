@@ -10,18 +10,17 @@ import {
 
 describe("cron workspace", () => {
   test("resolves the fixed cronjobs directory under ~/.codex-claw", () => {
-    expect(resolveCronjobsDirectory("/tmp/codex-claw-home")).toBe(
-      "/tmp/codex-claw-home/.codex-claw/cronjobs",
-    );
+    expect(resolveCronjobsDirectory("/tmp/codex-claw-home")).toBe("/tmp/codex-claw-home/cronjobs");
   });
 
   test("creates the cronjobs directory when missing", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-workspace-"));
+    const homeDir = path.join(root, ".codex-claw");
 
     try {
-      const directory = await ensureCronjobsDirectory(root);
+      const directory = await ensureCronjobsDirectory(homeDir);
 
-      expect(directory).toBe(path.join(root, ".codex-claw", "cronjobs"));
+      expect(directory).toBe(path.join(homeDir, "cronjobs"));
       expect(statSync(directory).isDirectory()).toBe(true);
     } finally {
       rmSync(root, { force: true, recursive: true });

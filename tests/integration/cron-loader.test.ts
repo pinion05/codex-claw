@@ -8,7 +8,8 @@ import { createRuntimeDeps } from "../../src/runtime/create-runtime-deps";
 describe("createCronRuntime loading", () => {
   test("detects, parses, and injects enabled scheduled jobs", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-loader-"));
-    const cronjobsDir = path.join(root, ".codex-claw", "cronjobs");
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
 
     try {
       mkdirSync(cronjobsDir, { recursive: true });
@@ -25,7 +26,7 @@ describe("createCronRuntime loading", () => {
       );
 
       const runtime = createCronRuntime({
-        codexClawHomeDir: root,
+        codexClawHomeDir,
         dispatchPrompt: async () => undefined,
       });
 

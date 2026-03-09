@@ -13,6 +13,14 @@ type RefreshReport = {
 
 type TimerHandle = ReturnType<typeof setInterval>;
 
+function createEmptyRefreshReport(): RefreshReport {
+  return {
+    registered: [],
+    skippedDisabled: [],
+    errors: [],
+  };
+}
+
 export function createCronRuntime({
   codexClawHomeDir,
   dispatchPrompt,
@@ -104,7 +112,13 @@ export function createCronRuntime({
   }
 
   async function start(): Promise<RefreshReport> {
-    const report = await refresh();
+    let report = createEmptyRefreshReport();
+
+    try {
+      report = await refresh();
+    } catch (error) {
+      reportBackgroundError(error);
+    }
 
     try {
       await scheduler.tick();
