@@ -31,11 +31,17 @@ export async function main(): Promise<void> {
   }
 
   console.info(`[codex-claw] starting Telegram bot with workspace ${config.workspaceDir}`);
-  await bot.start({
-    onStart(botInfo) {
-      console.info(`[codex-claw] polling as @${botInfo.username}`);
-    },
-  });
+  await handlers.startBackgroundServices();
+
+  try {
+    await bot.start({
+      onStart(botInfo) {
+        console.info(`[codex-claw] polling as @${botInfo.username}`);
+      },
+    });
+  } finally {
+    handlers.stopBackgroundServices();
+  }
 }
 
 if (import.meta.main) {
