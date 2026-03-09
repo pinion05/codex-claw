@@ -37,4 +37,48 @@ describe("createCronRuntime dispatch", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  test("routes background tick failures into the configured error sink", async () => {
+    let intervalCallback: (() => void) | undefined;
+    let tickCount = 0;
+    const onBackgroundError = mock((_error: unknown) => undefined);
+    const scheduler = {
+      upsert() {},
+      remove() {},
+      listJobIds() {
+        return [];
+      },
+      async tick() {
+        tickCount += 1;
+
+        if (tickCount === 1) {
+          return;
+        }
+
+        throw new Error("background tick failed");
+      },
+      stopAll() {},
+      getDueJobs() {
+        return [];
+      },
+    };
+
+    const runtime = createCronRuntime({
+      scheduler,
+      dispatchPrompt: async () => undefined,
+      setIntervalFn: ((callback: () => void) => {
+        intervalCallback = callback;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      }) as typeof setInterval,
+      clearIntervalFn: (() => undefined) as typeof clearInterval,
+      onBackgroundError,
+    });
+
+    await runtime.start();
+    intervalCallback?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onBackgroundError).toHaveBeenCalledTimes(1);
+    expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+  });
 });

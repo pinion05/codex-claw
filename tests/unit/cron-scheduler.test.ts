@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { createScheduledJobScheduler } from "../../src/cron/scheduler";
 import type { ScheduledJobSpec } from "../../src/cron/types";
 
@@ -64,5 +64,20 @@ describe("createScheduledJobScheduler", () => {
     const job = createJob({ id: "disabled-job", disabled: true });
 
     expect(scheduler.getDueJobs([job], new Date(2027, 6, 11, 9, 0, 0))).toEqual([]);
+  });
+
+  test("continues running other due jobs when one job fails", async () => {
+    const scheduler = createScheduledJobScheduler();
+    const firstRun = mock(async () => {
+      throw new Error("first failed");
+    });
+    const secondRun = mock(async () => undefined);
+
+    scheduler.upsert(createJob({ id: "first-job" }), firstRun);
+    scheduler.upsert(createJob({ id: "second-job" }), secondRun);
+
+    await expect(scheduler.tick(new Date(2027, 6, 11, 9, 0, 0))).rejects.toThrow("first failed");
+    expect(firstRun).toHaveBeenCalledTimes(1);
+    expect(secondRun).toHaveBeenCalledTimes(1);
   });
 });

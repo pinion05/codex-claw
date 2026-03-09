@@ -17,6 +17,7 @@ export function createCronRuntime({
   codexClawHomeDir,
   dispatchPrompt,
   codex,
+  onBackgroundError,
   scheduler = createScheduledJobScheduler(),
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
@@ -28,6 +29,7 @@ export function createCronRuntime({
   codex?: {
     runTurn: (request: { threadId: string | null; prompt: string }) => Promise<unknown>;
   };
+  onBackgroundError?: (error: unknown) => void;
   scheduler?: ReturnType<typeof createScheduledJobScheduler>;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
@@ -44,6 +46,11 @@ export function createCronRuntime({
         threadId: null,
         prompt,
       });
+    });
+  const reportBackgroundError =
+    onBackgroundError ??
+    ((error: unknown) => {
+      console.error("[codex-claw] cron background tick failed", error);
     });
   const injector = createScheduledJobInjector({
     scheduler,
@@ -100,7 +107,7 @@ export function createCronRuntime({
     const report = await tick();
 
     timer = setIntervalFn(() => {
-      void tick();
+      void tick().catch(reportBackgroundError);
     }, intervalMs);
 
     return report;

@@ -70,6 +70,7 @@ export function createScheduledJobScheduler() {
         [...jobs.values()].map((entry) => entry.spec),
         now,
       );
+      const errors: unknown[] = [];
 
       for (const spec of dueJobs) {
         const registered = jobs.get(spec.id);
@@ -78,7 +79,19 @@ export function createScheduledJobScheduler() {
           continue;
         }
 
-        await registered.run();
+        try {
+          await registered.run();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+
+      if (errors.length === 1) {
+        throw errors[0];
+      }
+
+      if (errors.length > 1) {
+        throw new AggregateError(errors, "One or more scheduled jobs failed.");
       }
     },
     stopAll(): void {
