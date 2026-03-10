@@ -2,8 +2,8 @@ import { describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createCronRuntime } from "../../src/cron/runtime";
 import { createRuntimeDeps } from "../../src/runtime/create-runtime-deps";
+import { createCronRuntime } from "../../src/cron/runtime";
 
 describe("createCronRuntime loading", () => {
   test("detects, parses, and injects enabled scheduled jobs", async () => {
@@ -84,6 +84,106 @@ describe("createCronRuntime loading", () => {
 });
 
 describe("createRuntimeDeps cron wiring", () => {
+  test("runs a real cron runtime through createRuntimeDeps with an isolated codex home", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-e2e-"));
+    const workspaceDir = path.join(root, "workspace");
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: [],
+    }));
+    const sendTelegramMessage = mock(async (_chatId: bigint, _text: string) => undefined);
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      mkdirSync(path.join(workspaceDir, "state"), { recursive: true });
+      await Bun.write(
+        path.join(workspaceDir, "state", "session.json"),
+        JSON.stringify({
+          chatId: "123",
+          threadId: "thread_live",
+          isRunning: false,
+          lastStartedAt: null,
+          lastCompletedAt: null,
+          lastSummary: null,
+          logFile: null,
+        }),
+      );
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time,
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const deps = createRuntimeDeps(
+        {
+          telegramBotToken: null,
+          openAiApiKey: null,
+          workspaceDir,
+        },
+        {
+          createSdkRuntimeClientFn: () => ({ runTurn }),
+          createCronRuntimeFn: (options) =>
+            createCronRuntime({
+              ...options,
+              codexClawHomeDir,
+            }),
+        },
+        {
+          sendTelegramMessage,
+        },
+      );
+
+      await deps.startCronRuntime();
+      deps.stopCronRuntime();
+
+      expect(runTurn).toHaveBeenCalledWith({
+        threadId: null,
+        prompt: "Summarize the latest workspace changes.",
+      });
+      expect(sendTelegramMessage).toHaveBeenCalledWith(123n, "done");
+
+      const yearDir = readdirSync(path.join(workspaceDir, "logs"))[0];
+      const monthDir = readdirSync(path.join(workspaceDir, "logs", yearDir!))[0];
+      const dayDir = readdirSync(path.join(workspaceDir, "logs", yearDir!, monthDir!))[0];
+      const logDir = path.join(workspaceDir, "logs", yearDir!, monthDir!, dayDir!);
+      const entries = readdirSync(logDir).map((fileName) =>
+        JSON.parse(readFileSync(path.join(logDir, fileName), "utf8")) as Record<string, unknown>,
+      );
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            jobId: "daily-summary",
+            phase: "execution",
+            status: "completed",
+            chatId: "123",
+            threadId: "thread_1",
+          }),
+          expect.objectContaining({
+            jobId: "daily-summary",
+            phase: "delivery",
+            status: "completed",
+            chatId: "123",
+            threadId: "thread_1",
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   test("starts the cron runtime with the shared Codex client and narrow cron helpers", async () => {
     const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-"));
     let cronArgs:
