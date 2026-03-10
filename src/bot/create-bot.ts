@@ -473,14 +473,11 @@ async function processFinalizedAttachmentBundle(
       return;
     }
 
-    void onPrompt({
+    await onPrompt({
       chatId: context.chatId,
       prompt,
       startTyping: context.startTyping,
       reply: context.reply,
-    }).catch(async (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      await context.reply(formatRunFailedMessage(message));
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

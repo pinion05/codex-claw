@@ -422,6 +422,50 @@ describe("registerBotHandlers", () => {
     expect(replies).toEqual(["done"]);
   });
 
+  test("document messages do not resolve before the attachment run finishes", async () => {
+    const bot = new FakeBot();
+    const replies: string[] = [];
+    const runTurn = createDeferred<{ summary: string }>();
+    let dispatchResolved = false;
+
+    registerBotHandlers(bot as never, {
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn: mock(async () => runTurn.promise),
+      prepareAttachments: mock(async () => "prepared document prompt"),
+      downloadTelegramFile: mock(async () => ({
+        bytes: new TextEncoder().encode("document body"),
+        filePath: "downloads/report.txt",
+        mimeType: "text/plain",
+      })),
+    });
+
+    const dispatchPromise = bot
+      .dispatch(
+        "message:document",
+        createDocumentContext({
+          messageId: 205,
+          caption: "review the document",
+          replies,
+        }),
+      )
+      .then(() => {
+        dispatchResolved = true;
+      });
+
+    await flushAsyncWork();
+
+    expect(dispatchResolved).toBeFalse();
+    expect(replies).toEqual([]);
+
+    runTurn.resolve({ summary: "done" });
+    await dispatchPromise;
+
+    expect(dispatchResolved).toBeTrue();
+    expect(replies).toEqual(["done"]);
+  });
+
   test("single photo messages prepare attachments and run one turn", async () => {
     const bot = new FakeBot();
     const replies: string[] = [];
@@ -540,6 +584,64 @@ describe("registerBotHandlers", () => {
     expect(preparedInput?.attachments).toHaveLength(2);
     expect(runTurn).toHaveBeenCalledTimes(1);
     expect(runTurn).toHaveBeenCalledWith(123n, "prepared album prompt");
+    expect(replies).toEqual(["done"]);
+  });
+
+  test("album finalization does not resolve before the attachment run finishes", async () => {
+    const bot = new FakeBot();
+    const replies: string[] = [];
+    const scheduler = new FakeScheduler();
+    const runTurn = createDeferred<{ summary: string }>();
+    let finalizeResolved = false;
+
+    registerBotHandlers(bot as never, {
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn: mock(async () => runTurn.promise),
+      prepareAttachments: mock(async () => "prepared album prompt"),
+      downloadTelegramFile: mock(async (fileId: string) => ({
+        bytes: new TextEncoder().encode(fileId),
+        filePath: `downloads/${fileId}.jpg`,
+        mimeType: "image/jpeg",
+      })),
+      attachmentCollectorScheduler: scheduler,
+      attachmentCollectorQuietPeriodMs: 25,
+    });
+
+    await bot.dispatch(
+      "message:photo",
+      createPhotoContext({
+        messageId: 320,
+        mediaGroupId: "album-awaits-run",
+        replies,
+        fileIdPrefix: "album-first",
+      }),
+    );
+    await bot.dispatch(
+      "message:photo",
+      createPhotoContext({
+        messageId: 321,
+        mediaGroupId: "album-awaits-run",
+        caption: "album caption",
+        replies,
+        fileIdPrefix: "album-second",
+      }),
+    );
+
+    const finalizePromise = scheduler.runNext().then(() => {
+      finalizeResolved = true;
+    });
+
+    await flushAsyncWork();
+
+    expect(finalizeResolved).toBeFalse();
+    expect(replies).toEqual([]);
+
+    runTurn.resolve({ summary: "done" });
+    await finalizePromise;
+
+    expect(finalizeResolved).toBeTrue();
     expect(replies).toEqual(["done"]);
   });
 

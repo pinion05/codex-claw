@@ -96,26 +96,17 @@ export async function saveTelegramMessageBundle(
     input.chatId,
     input.messageId,
   );
-  let stagingDir: string;
-
-  try {
-    stagingDir = await createTelegramMessageBundleStagingDirectory(
-      input.workspaceDir,
-      input.chatId,
-      input.messageId,
-    );
-  } catch (error) {
-    if (error instanceof TelegramMessageBundleAlreadyExistsError) {
-      return error.savedBundle;
-    }
-
-    throw error;
-  }
+  const stagingDir = await createTelegramMessageBundleStagingDirectory(
+    input.workspaceDir,
+    input.chatId,
+    input.messageId,
+  );
 
   const bundleJsonPath = path.join(bundleDir, "bundle.json");
 
   try {
     const attachments: TelegramMessageAttachment[] = [];
+    const failedAttachmentsWereReported = input.failedAttachments !== undefined;
     const failedAttachments: TelegramFailedAttachment[] = (input.failedAttachments ?? []).map(
       (attachment) => ({
         index: attachment.index,
@@ -159,7 +150,13 @@ export async function saveTelegramMessageBundle(
     };
     await writeTelegramMessageBundleJson(path.join(stagingDir, "bundle.json"), bundle);
     await mkdir(path.dirname(bundleDir), { recursive: true });
-    const publishedBundle = await publishTelegramMessageBundle(stagingDir, bundleDir, bundleJsonPath, bundle);
+    const publishedBundle = await publishTelegramMessageBundle(
+      stagingDir,
+      bundleDir,
+      bundleJsonPath,
+      bundle,
+      failedAttachmentsWereReported,
+    );
 
     return publishedBundle;
   } catch (error) {
@@ -176,14 +173,24 @@ export async function writeTelegramMessageBundleJson(
     `${bundleJsonPath}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
 
   await writeFile(temporaryPath, JSON.stringify(bundle, null, 2));
-  await rename(temporaryPath, bundleJsonPath);
+
+  try {
+    await rename(temporaryPath, bundleJsonPath);
+  } catch (error) {
+    try {
+      await rm(temporaryPath, { force: true });
+    } catch {}
+
+    throw error;
+  }
 }
 
 export function composeTelegramMessageBundlePrompt(bundle: TelegramMessageBundle): string {
+  const normalizedBundle = normalizeTelegramMessageBundle(bundle);
   const sections = [
-    ["User caption", composeCaptionSection(bundle.caption)],
-    ["Attachments", composeAttachmentsSection(bundle.attachments)],
-    ["Failed attachments", composeFailedAttachmentsSection(bundle.failedAttachments)],
+    ["User caption", composeCaptionSection(normalizedBundle.caption)],
+    ["Attachments", composeAttachmentsSection(normalizedBundle.attachments)],
+    ["Failed attachments", composeFailedAttachmentsSection(normalizedBundle.failedAttachments)],
   ];
 
   return sections.map(([title, body]) => `${title}\n${body}`).join("\n\n");
@@ -315,13 +322,6 @@ async function createTelegramMessageBundleStagingDirectory(
   messageId: number,
 ): Promise<string> {
   const inboxDir = path.join(workspaceDir, "inbox");
-  const bundleDir = getTelegramMessageBundleDirectory(workspaceDir, chatId, messageId);
-
-  const existingBundle = await tryReadExistingTelegramMessageBundle(bundleDir);
-
-  if (existingBundle) {
-    throw new TelegramMessageBundleAlreadyExistsError(bundleDir, existingBundle);
-  }
 
   await mkdir(inboxDir, { recursive: true });
 
@@ -348,7 +348,7 @@ async function tryReadExistingTelegramMessageBundle(
   }
 
   const bundleJsonPath = path.join(bundleDir, "bundle.json");
-  const bundle = JSON.parse(await readFile(bundleJsonPath, "utf8")) as TelegramMessageBundle;
+  const bundle = normalizeTelegramMessageBundle(JSON.parse(await readFile(bundleJsonPath, "utf8")));
 
   return {
     bundleDir,
@@ -362,6 +362,7 @@ async function publishTelegramMessageBundle(
   bundleDir: string,
   bundleJsonPath: string,
   bundle: TelegramMessageBundle,
+  failedAttachmentsWereReported: boolean,
 ): Promise<SavedTelegramMessageBundle> {
   try {
     await rename(stagingDir, bundleDir);
@@ -375,6 +376,27 @@ async function publishTelegramMessageBundle(
       const existingBundle = await tryReadExistingTelegramMessageBundle(bundleDir);
 
       if (existingBundle) {
+        const healPlan = createTelegramMessageBundleHealPlan(existingBundle.bundle, bundle, {
+          failedAttachmentsWereReported,
+        });
+
+        if (healPlan.improved) {
+          await applyTelegramMessageBundleHealPlan({
+            stagingDir,
+            bundleDir,
+            bundleJsonPath,
+            candidateBundle: bundle,
+            healPlan,
+          });
+          await cleanupTelegramMessageBundleStagingDirectory(stagingDir);
+
+          return {
+            bundleDir,
+            bundleJsonPath,
+            bundle: healPlan.bundle,
+          };
+        }
+
         await cleanupTelegramMessageBundleStagingDirectory(stagingDir);
         return existingBundle;
       }
@@ -435,6 +457,379 @@ function getFailureReason(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
 }
 
+function normalizeTelegramMessageBundle(bundle: unknown): TelegramMessageBundle {
+  const record = expectRecord(bundle, "Telegram message bundle");
+
+  return {
+    version: TELEGRAM_MESSAGE_BUNDLE_VERSION,
+    chatId: expectNumber(record.chatId, "Telegram message bundle.chatId"),
+    messageId: expectNumber(record.messageId, "Telegram message bundle.messageId"),
+    mediaGroupId: normalizeOptionalString(record.mediaGroupId),
+    caption: normalizeOptionalString(record.caption),
+    attachments: normalizeTelegramMessageAttachments(record.attachments),
+    failedAttachments: normalizeTelegramFailedAttachments(record.failedAttachments),
+  };
+}
+
+function normalizeTelegramMessageAttachments(value: unknown): TelegramMessageAttachment[] {
+  if (value == null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("Telegram message bundle.attachments must be an array");
+  }
+
+  return value
+    .map((attachment, index) => normalizeTelegramMessageAttachment(attachment, index))
+    .sort((left, right) => left.index - right.index);
+}
+
+function normalizeTelegramMessageAttachment(
+  attachment: unknown,
+  index: number,
+): TelegramMessageAttachment {
+  const record = expectRecord(attachment, `Telegram message bundle.attachments[${index}]`);
+  const kind = record.kind;
+
+  if (kind !== "document" && kind !== "photo") {
+    throw new Error(
+      `Telegram message bundle.attachments[${index}].kind must be "document" or "photo"`,
+    );
+  }
+
+  return {
+    index: expectNumber(
+      record.index,
+      `Telegram message bundle.attachments[${index}].index`,
+    ),
+    kind,
+    name: expectString(
+      record.name,
+      `Telegram message bundle.attachments[${index}].name`,
+    ),
+    path: expectString(
+      record.path,
+      `Telegram message bundle.attachments[${index}].path`,
+    ),
+    mimeType: normalizeOptionalString(record.mimeType),
+    sizeBytes: normalizeOptionalNumber(record.sizeBytes),
+  };
+}
+
+function normalizeTelegramFailedAttachments(value: unknown): TelegramFailedAttachment[] {
+  if (value == null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("Telegram message bundle.failedAttachments must be an array");
+  }
+
+  return value
+    .map((attachment, index) => normalizeTelegramFailedAttachment(attachment, index))
+    .sort((left, right) => left.index - right.index);
+}
+
+function normalizeTelegramFailedAttachment(
+  attachment: unknown,
+  index: number,
+): TelegramFailedAttachment {
+  const record = expectRecord(attachment, `Telegram message bundle.failedAttachments[${index}]`);
+
+  return {
+    index: expectNumber(
+      record.index,
+      `Telegram message bundle.failedAttachments[${index}].index`,
+    ),
+    name: expectString(
+      record.name,
+      `Telegram message bundle.failedAttachments[${index}].name`,
+    ),
+    reason: expectString(
+      record.reason,
+      `Telegram message bundle.failedAttachments[${index}].reason`,
+    ),
+  };
+}
+
+type TelegramMessageBundleHealPlan = {
+  bundle: TelegramMessageBundle;
+  improved: boolean;
+  candidateAttachmentIndexesToPersist: number[];
+  supersededAttachmentPathsToDelete: string[];
+};
+
+function createTelegramMessageBundleHealPlan(
+  existingBundle: TelegramMessageBundle,
+  candidateBundle: TelegramMessageBundle,
+  options: {
+    failedAttachmentsWereReported: boolean;
+  },
+): TelegramMessageBundleHealPlan {
+  const existingAttachments = new Map(existingBundle.attachments.map((attachment) => [
+    attachment.index,
+    attachment,
+  ]));
+  const candidateAttachments = new Map(candidateBundle.attachments.map((attachment) => [
+    attachment.index,
+    attachment,
+  ]));
+  const existingFailures = new Map(existingBundle.failedAttachments.map((attachment) => [
+    attachment.index,
+    attachment,
+  ]));
+  const candidateFailures = new Map(candidateBundle.failedAttachments.map((attachment) => [
+    attachment.index,
+    attachment,
+  ]));
+  const candidateAttachmentIndexesToPersist = new Set<number>();
+  const supersededAttachmentPathsToDelete = new Set<string>();
+  const mergedAttachments: TelegramMessageAttachment[] = [];
+  const attachmentIndexes = new Set([
+    ...existingAttachments.keys(),
+    ...candidateAttachments.keys(),
+  ]);
+
+  for (const attachmentIndex of [...attachmentIndexes].sort((left, right) => left - right)) {
+    const existingAttachment = existingAttachments.get(attachmentIndex);
+    const candidateAttachment = candidateAttachments.get(attachmentIndex);
+
+    if (!existingAttachment && candidateAttachment) {
+      mergedAttachments.push(candidateAttachment);
+      candidateAttachmentIndexesToPersist.add(attachmentIndex);
+      continue;
+    }
+
+    if (!candidateAttachment && existingAttachment) {
+      mergedAttachments.push(existingAttachment);
+      continue;
+    }
+
+    if (!existingAttachment || !candidateAttachment) {
+      continue;
+    }
+
+    if (shouldPreferCandidateAttachment(existingAttachment, candidateAttachment)) {
+      mergedAttachments.push(candidateAttachment);
+      candidateAttachmentIndexesToPersist.add(attachmentIndex);
+      supersededAttachmentPathsToDelete.add(existingAttachment.path);
+
+      continue;
+    }
+
+    mergedAttachments.push(existingAttachment);
+  }
+
+  const successfulAttachmentIndexes = new Set(mergedAttachments.map((attachment) => attachment.index));
+  const mergedFailedAttachments: TelegramFailedAttachment[] = [];
+  const failureIndexes = options.failedAttachmentsWereReported
+    ? new Set(candidateFailures.keys())
+    : new Set([...existingFailures.keys(), ...candidateFailures.keys()]);
+
+  for (const attachmentIndex of [...failureIndexes].sort((left, right) => left - right)) {
+    if (successfulAttachmentIndexes.has(attachmentIndex)) {
+      continue;
+    }
+
+    const existingFailure = existingFailures.get(attachmentIndex);
+    const candidateFailure = candidateFailures.get(attachmentIndex);
+
+    if (!existingFailure && candidateFailure) {
+      mergedFailedAttachments.push(candidateFailure);
+      continue;
+    }
+
+    if (!options.failedAttachmentsWereReported && existingFailure) {
+      mergedFailedAttachments.push(existingFailure);
+      continue;
+    }
+
+    if (existingFailure && candidateFailure) {
+      mergedFailedAttachments.push(existingFailure);
+      continue;
+    }
+  }
+
+  const mergedBundle: TelegramMessageBundle = {
+    version: TELEGRAM_MESSAGE_BUNDLE_VERSION,
+    chatId: existingBundle.chatId,
+    messageId: existingBundle.messageId,
+    mediaGroupId: pickPreferredOptionalString(existingBundle.mediaGroupId, candidateBundle.mediaGroupId),
+    caption: pickPreferredOptionalString(existingBundle.caption, candidateBundle.caption),
+    attachments: mergedAttachments,
+    failedAttachments: mergedFailedAttachments,
+  };
+
+  return {
+    bundle: mergedBundle,
+    improved: JSON.stringify(mergedBundle) !== JSON.stringify(existingBundle),
+    candidateAttachmentIndexesToPersist: [...candidateAttachmentIndexesToPersist].sort(
+      (left, right) => left - right,
+    ),
+    supersededAttachmentPathsToDelete: [...supersededAttachmentPathsToDelete].sort(),
+  };
+}
+
+function shouldPreferCandidateAttachment(
+  existingAttachment: TelegramMessageAttachment,
+  candidateAttachment: TelegramMessageAttachment,
+): boolean {
+  return (
+    existingAttachment.mimeType == null &&
+      candidateAttachment.mimeType != null ||
+    existingAttachment.sizeBytes == null &&
+      candidateAttachment.sizeBytes != null
+  );
+}
+
+async function applyTelegramMessageBundleHealPlan(input: {
+  stagingDir: string;
+  bundleDir: string;
+  bundleJsonPath: string;
+  candidateBundle: TelegramMessageBundle;
+  healPlan: TelegramMessageBundleHealPlan;
+}): Promise<void> {
+  const candidateAttachments = new Map(input.candidateBundle.attachments.map((attachment) => [
+    attachment.index,
+    attachment,
+  ]));
+  const rollbackDir = path.join(
+    path.dirname(input.bundleDir),
+    `.telegram-message-bundle-heal-${path.basename(input.bundleDir)}-${randomUUID()}.rollback`,
+  );
+
+  await mkdir(rollbackDir);
+
+  try {
+    for (const filePath of input.healPlan.supersededAttachmentPathsToDelete) {
+      await rename(
+        path.join(input.bundleDir, path.basename(filePath)),
+        path.join(rollbackDir, path.basename(filePath)),
+      );
+    }
+
+    for (const attachmentIndex of input.healPlan.candidateAttachmentIndexesToPersist) {
+      const attachment = candidateAttachments.get(attachmentIndex);
+
+      if (!attachment) {
+        continue;
+      }
+
+      await rename(
+        path.join(input.stagingDir, path.basename(attachment.path)),
+        path.join(input.bundleDir, path.basename(attachment.path)),
+      );
+    }
+
+    await writeTelegramMessageBundleJson(input.bundleJsonPath, input.healPlan.bundle);
+  } catch (error) {
+    await rollbackTelegramMessageBundleHeal({
+      bundleDir: input.bundleDir,
+      rollbackDir,
+      stagingDir: input.stagingDir,
+      candidateBundle: input.candidateBundle,
+      healPlan: input.healPlan,
+    });
+    throw error;
+  }
+
+  await rm(rollbackDir, { force: true, recursive: true });
+}
+
+async function rollbackTelegramMessageBundleHeal(input: {
+  bundleDir: string;
+  rollbackDir: string;
+  stagingDir: string;
+  candidateBundle: TelegramMessageBundle;
+  healPlan: TelegramMessageBundleHealPlan;
+}): Promise<void> {
+  const candidateAttachments = new Map(input.candidateBundle.attachments.map((attachment) => [
+    attachment.index,
+    attachment,
+  ]));
+
+  for (const attachmentIndex of input.healPlan.candidateAttachmentIndexesToPersist) {
+    const attachment = candidateAttachments.get(attachmentIndex);
+
+    if (!attachment) {
+      continue;
+    }
+
+    await moveFileIfExists(
+      path.join(input.bundleDir, path.basename(attachment.path)),
+      path.join(input.stagingDir, path.basename(attachment.path)),
+    );
+  }
+
+  for (const filePath of input.healPlan.supersededAttachmentPathsToDelete) {
+    await moveFileIfExists(
+      path.join(input.rollbackDir, path.basename(filePath)),
+      path.join(input.bundleDir, path.basename(filePath)),
+    );
+  }
+
+  await rm(input.rollbackDir, { force: true, recursive: true });
+}
+
+async function moveFileIfExists(fromPath: string, toPath: string): Promise<void> {
+  try {
+    await rename(fromPath, toPath);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+function expectRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function expectNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number`);
+  }
+
+  return value;
+}
+
+function expectString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string`);
+  }
+
+  return value;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function normalizeOptionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function pickPreferredOptionalString(
+  existingValue: string | null | undefined,
+  candidateValue: string | null | undefined,
+): string | null {
+  const normalizedExisting = normalizeOptionalString(existingValue);
+
+  if (normalizedExisting?.trim()) {
+    return normalizedExisting;
+  }
+
+  const normalizedCandidate = normalizeOptionalString(candidateValue);
+  return normalizedCandidate?.trim() ? normalizedCandidate : null;
+}
+
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
@@ -451,15 +846,5 @@ class TelegramMessageBundleStorageError extends Error {
   constructor(message: string, readonly cause?: unknown) {
     super(message);
     this.name = "TelegramMessageBundleStorageError";
-  }
-}
-
-class TelegramMessageBundleAlreadyExistsError extends Error {
-  constructor(
-    readonly bundleDir: string,
-    readonly savedBundle: SavedTelegramMessageBundle,
-  ) {
-    super(`Telegram message bundle already exists at ${bundleDir}`);
-    this.name = "TelegramMessageBundleAlreadyExistsError";
   }
 }
