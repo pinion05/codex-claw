@@ -2,6 +2,10 @@ import type { CreateBotHandlersDeps } from "../bot/create-bot";
 import { formatStatusMessage } from "../bot/formatters";
 import type { AppConfig } from "../config";
 import { createCronRuntime } from "../cron/runtime";
+import {
+  composeTelegramMessageBundlePrompt,
+  saveTelegramMessageBundle,
+} from "../files/telegram-message-bundle";
 import { createSdkRuntimeClient } from "../codex/sdk-runtime-client";
 import { resolveCodexClawHomeDir } from "../lib/paths";
 import { FileSessionStore } from "../session/session-store";
@@ -134,6 +138,14 @@ export function createRuntimeDeps(
     resetSession: async (chatId) => runtime.resetSession(chatId),
     abortRun: async (chatId) => runtime.abortRun(chatId),
     runTurn: async (chatId, prompt) => runtime.runTurn(chatId, prompt),
+    prepareAttachments: async (input) => {
+      const savedBundle = await saveTelegramMessageBundle({
+        workspaceDir: config.workspaceDir,
+        ...input,
+      });
+
+      return composeTelegramMessageBundlePrompt(savedBundle.bundle);
+    },
     startBackgroundServices: startCronRuntime,
     stopBackgroundServices: stopCronRuntime,
     startCronRuntime,

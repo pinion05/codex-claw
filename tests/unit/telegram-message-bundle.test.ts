@@ -1,0 +1,1003 @@
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import {
+  existsSync,
+  mkdtempSync,
+  promises as actualFsPromises,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  composeTelegramMessageBundlePrompt,
+  saveTelegramMessageBundle,
+  type TelegramFailedAttachment,
+  type TelegramMessageAttachment,
+  type TelegramMessageBundle,
+} from "../../src/files/telegram-message-bundle";
+
+function createAttachment(
+  overrides?: Partial<TelegramMessageAttachment>,
+): TelegramMessageAttachment {
+  return {
+    index: 1,
+    kind: "document",
+    name: "report.json",
+    path: "/tmp/report.json",
+    mimeType: "application/json",
+    sizeBytes: 128,
+    ...overrides,
+  };
+}
+
+function createFailedAttachment(
+  overrides?: Partial<TelegramFailedAttachment>,
+): TelegramFailedAttachment {
+  return {
+    index: 2,
+    name: "broken.png",
+    reason: "download failed",
+    ...overrides,
+  };
+}
+
+function createBundle(overrides?: Partial<TelegramMessageBundle>): TelegramMessageBundle {
+  return {
+    version: 2,
+    chatId: 100,
+    messageId: 200,
+    mediaGroupId: "album-1",
+    caption: "이 파일 검토해줘",
+    attachments: [createAttachment()],
+    failedAttachments: [],
+    ...overrides,
+  };
+}
+
+type TelegramMessageBundleModule = typeof import("../../src/files/telegram-message-bundle");
+
+afterEach(() => {
+  mock.restore();
+});
+
+async function loadTelegramMessageBundleModule(): Promise<TelegramMessageBundleModule> {
+  return import(`../../src/files/telegram-message-bundle.ts?test=${Date.now()}-${Math.random()}`);
+}
+
+async function loadTelegramMessageBundleModuleWithFsOverrides(
+  overrides: Partial<typeof actualFsPromises>,
+): Promise<TelegramMessageBundleModule> {
+  mock.module("node:fs/promises", async () => {
+    return {
+      ...actualFsPromises,
+      ...overrides,
+    };
+  });
+
+  const module = await loadTelegramMessageBundleModule();
+  mock.restore();
+  return module;
+}
+
+async function loadTelegramMessageBundleModuleWithWriteFailure(
+  shouldFail: (targetPath: string) => boolean,
+  message: string,
+): Promise<TelegramMessageBundleModule> {
+  return loadTelegramMessageBundleModuleWithFsOverrides({
+    writeFile: async (
+      targetPath: Parameters<typeof actualFsPromises.writeFile>[0],
+      data: Parameters<typeof actualFsPromises.writeFile>[1],
+      options?: Parameters<typeof actualFsPromises.writeFile>[2],
+    ) => {
+      if (shouldFail(String(targetPath))) {
+        throw new Error(message);
+      }
+
+      return actualFsPromises.writeFile(targetPath, data, options);
+    },
+  });
+}
+
+function expectNoStagingResidue(workspaceDir: string) {
+  const inboxDir = path.join(workspaceDir, "inbox");
+
+  if (!existsSync(inboxDir)) {
+    return;
+  }
+
+  expect(readdirSync(inboxDir).filter((entry) => entry.endsWith(".staging"))).toEqual([]);
+}
+
+describe("saveTelegramMessageBundle", () => {
+  test("writes bundle metadata v2 including mediaGroupId", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const result = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 42,
+        messageId: 99,
+        mediaGroupId: "media-group-42",
+        caption: "please review",
+        attachments: [
+          {
+            kind: "document",
+            name: "report.txt",
+            mimeType: "text/plain",
+            bytes: new TextEncoder().encode("document body"),
+          },
+        ],
+      });
+
+      expect(result.bundle.version).toBe(2);
+      expect(result.bundle.mediaGroupId).toBe("media-group-42");
+
+      const savedBundle = JSON.parse(
+        readFileSync(path.join(result.bundleDir, "bundle.json"), "utf8"),
+      ) as TelegramMessageBundle;
+
+      expect(savedBundle.version).toBe(2);
+      expect(savedBundle.mediaGroupId).toBe("media-group-42");
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("keeps original order indexes on successful attachment metadata", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const result = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 42,
+        messageId: 100,
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first"),
+          },
+          {
+            kind: "photo",
+            name: "second.jpg",
+            variants: [
+              {
+                name: "second-large.jpg",
+                width: 1280,
+                height: 720,
+                bytes: new TextEncoder().encode("second"),
+                mimeType: "image/jpeg",
+              },
+            ],
+          },
+          {
+            kind: "document",
+            name: "third.txt",
+            bytes: new TextEncoder().encode("third"),
+          },
+        ],
+      });
+
+      expect(result.bundle.attachments.map((attachment) => attachment.index)).toEqual([1, 2, 3]);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("keeps original order indexes on failed attachment metadata", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const result = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 42,
+        messageId: 101,
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first"),
+          },
+          {
+            kind: "photo",
+            name: "broken-second.jpg",
+            variants: [],
+          },
+          {
+            kind: "document",
+            name: "third.txt",
+            bytes: new TextEncoder().encode("third"),
+          },
+          {
+            kind: "photo",
+            name: "broken-fourth.jpg",
+            variants: [],
+          },
+        ],
+      });
+
+      expect(result.bundle.attachments.map((attachment) => attachment.index)).toEqual([1, 3]);
+      expect(result.bundle.failedAttachments.map((attachment) => attachment.index)).toEqual([
+        2, 4,
+      ]);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("publishes only the final bundle directory and leaves no staging residue", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const result = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 77,
+        messageId: 501,
+        caption: "ship it",
+        attachments: [
+          {
+            kind: "document",
+            name: "artifact.txt",
+            bytes: new TextEncoder().encode("artifact"),
+          },
+        ],
+      });
+
+      expect(existsSync(result.bundleDir)).toBe(true);
+      expect(existsSync(result.bundleJsonPath)).toBe(true);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("normalizes a legacy saved bundle before reusing it", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+    const bundleDir = path.join(workspaceDir, "inbox", "90", "503");
+    const bundleJsonPath = path.join(bundleDir, "bundle.json");
+
+    try {
+      await actualFsPromises.mkdir(bundleDir, { recursive: true });
+      await actualFsPromises.writeFile(path.join(bundleDir, "1-artifact.txt"), "artifact");
+      await actualFsPromises.writeFile(
+        bundleJsonPath,
+        JSON.stringify({
+          chatId: 90,
+          messageId: 503,
+          caption: "legacy caption",
+          attachments: [
+            {
+              index: 1,
+              kind: "document",
+              name: "artifact.txt",
+              path: path.join(bundleDir, "1-artifact.txt"),
+            },
+          ],
+        }),
+      );
+
+      const result = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 503,
+        attachments: [],
+      });
+      const prompt = composeTelegramMessageBundlePrompt(result.bundle);
+
+      expect(result.bundle).toMatchObject({
+        version: 2,
+        chatId: 90,
+        messageId: 503,
+        mediaGroupId: null,
+        caption: "legacy caption",
+        attachments: [
+          {
+            index: 1,
+            kind: "document",
+            name: "artifact.txt",
+            path: path.join(bundleDir, "1-artifact.txt"),
+          },
+        ],
+        failedAttachments: [],
+      });
+      expect(prompt).toContain("legacy caption");
+      expect(prompt).toContain("Failed attachments\nNone");
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("heals an existing bundle when the retry adds successful attachments, removes failures, and fills a missing caption", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const firstResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 504,
+        caption: null,
+        attachments: [
+          {
+            kind: "document",
+            name: "artifact.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+        failedAttachments: [
+          {
+            index: 2,
+            name: "missing.txt",
+            reason: "download failed",
+          },
+        ],
+      });
+
+      const secondResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 504,
+        caption: "healed caption",
+        attachments: [
+          {
+            kind: "document",
+            name: "artifact.txt",
+            bytes: new TextEncoder().encode("second artifact"),
+          },
+          {
+            index: 2,
+            kind: "document",
+            name: "missing.txt",
+            bytes: new TextEncoder().encode("recovered artifact"),
+          },
+        ],
+        failedAttachments: [],
+      });
+
+      const savedBundle = JSON.parse(
+        readFileSync(firstResult.bundleJsonPath, "utf8"),
+      ) as TelegramMessageBundle;
+      const prompt = composeTelegramMessageBundlePrompt(secondResult.bundle);
+
+      expect(firstResult.bundle.caption).toBeNull();
+      expect(firstResult.bundle.failedAttachments).toEqual([
+        {
+          index: 2,
+          name: "missing.txt",
+          reason: "download failed",
+        },
+      ]);
+      expect(secondResult.bundle).toMatchObject({
+        version: 2,
+        chatId: 90,
+        messageId: 504,
+        mediaGroupId: null,
+        caption: "healed caption",
+        attachments: [
+          {
+            index: 1,
+            name: "artifact.txt",
+          },
+          {
+            index: 2,
+            name: "missing.txt",
+          },
+        ],
+        failedAttachments: [],
+      });
+      expect(savedBundle).toMatchObject(secondResult.bundle);
+      expect(prompt).toContain("User caption\nhealed caption");
+      expect(prompt).toContain("1. [document] artifact.txt");
+      expect(prompt).toContain("2. [document] missing.txt");
+      expect(prompt).toContain("Failed attachments\nNone");
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("heals a stale saved bundle when the manifest points at a missing attachment file", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const firstResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 5041,
+        caption: "restore attachment",
+        attachments: [
+          {
+            kind: "document",
+            name: "artifact.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+        failedAttachments: [],
+      });
+
+      const firstAttachmentPath = firstResult.bundle.attachments[0]?.path;
+      rmSync(String(firstAttachmentPath));
+
+      const secondResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 5041,
+        caption: "restore attachment",
+        attachments: [
+          {
+            kind: "document",
+            name: "artifact.txt",
+            bytes: new TextEncoder().encode("healed artifact"),
+          },
+        ],
+        failedAttachments: [],
+      });
+
+      expect(secondResult.bundle.attachments).toHaveLength(1);
+      expect(secondResult.bundle.failedAttachments).toEqual([]);
+      expect(existsSync(String(secondResult.bundle.attachments[0]?.path))).toBe(true);
+      expect(readFileSync(String(secondResult.bundle.attachments[0]?.path), "utf8")).toBe(
+        "healed artifact",
+      );
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("keeps the healthier saved bundle when a retry would make it worse", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const firstResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 505,
+        caption: "healthy caption",
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+          {
+            index: 2,
+            kind: "document",
+            name: "second.txt",
+            bytes: new TextEncoder().encode("second artifact"),
+          },
+        ],
+        failedAttachments: [],
+      });
+
+      const secondResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 505,
+        caption: null,
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+        failedAttachments: [
+          {
+            index: 2,
+            name: "second.txt",
+            reason: "download failed",
+          },
+        ],
+      });
+
+      expect(secondResult.bundle).toEqual(firstResult.bundle);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("preserves existing failed attachments when a retry omits failedAttachments entirely", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 506,
+        caption: "needs retry",
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+        failedAttachments: [
+          {
+            index: 2,
+            name: "second.txt",
+            reason: "download failed",
+          },
+        ],
+      });
+
+      const secondResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 506,
+        caption: "needs retry",
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+      });
+
+      expect(secondResult.bundle.failedAttachments).toEqual([
+        {
+          index: 2,
+          name: "second.txt",
+          reason: "download failed",
+        },
+      ]);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("heals by dropping stale failed attachments that the retry no longer reports", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 506,
+        caption: "needs retry",
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+        failedAttachments: [
+          {
+            index: 2,
+            name: "second.txt",
+            reason: "download failed",
+          },
+          {
+            index: 3,
+            name: "third.txt",
+            reason: "download failed",
+          },
+        ],
+      });
+
+      const secondResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 506,
+        caption: "needs retry",
+        attachments: [
+          {
+            kind: "document",
+            name: "first.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+        failedAttachments: [
+          {
+            index: 2,
+            name: "second.txt",
+            reason: "download failed",
+          },
+        ],
+      });
+
+      expect(secondResult.bundle.failedAttachments).toEqual([
+        {
+          index: 2,
+          name: "second.txt",
+          reason: "download failed",
+        },
+      ]);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("removes the superseded file when heal upgrades an attachment to a new stored filename", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const firstResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 507,
+        caption: "upgrade attachment",
+        attachments: [
+          {
+            kind: "document",
+            name: "old-name.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+      });
+
+      const legacyBundle = {
+        ...firstResult.bundle,
+        attachments: firstResult.bundle.attachments.map((attachment) => ({
+          ...attachment,
+          mimeType: null,
+        })),
+      };
+      const oldPath = legacyBundle.attachments[0]?.path;
+
+      await actualFsPromises.writeFile(
+        firstResult.bundleJsonPath,
+        JSON.stringify(legacyBundle, null, 2),
+      );
+
+      const secondResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 507,
+        caption: "upgrade attachment",
+        attachments: [
+          {
+            kind: "document",
+            index: 1,
+            name: "new-name.txt",
+            mimeType: "text/plain",
+            bytes: new TextEncoder().encode("upgraded artifact"),
+          },
+        ],
+      });
+
+      const newPath = secondResult.bundle.attachments[0]?.path;
+
+      expect(newPath).not.toBe(oldPath);
+      expect(existsSync(String(newPath))).toBe(true);
+      expect(existsSync(String(oldPath))).toBe(false);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("preserves the live bundle when heal manifest write fails after preparing upgraded files", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const firstResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 508,
+        caption: "upgrade attachment",
+        attachments: [
+          {
+            kind: "document",
+            name: "old-name.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+      });
+      const bundleDir = firstResult.bundleDir;
+      const legacyBundle = {
+        ...firstResult.bundle,
+        attachments: firstResult.bundle.attachments.map((attachment) => ({
+          ...attachment,
+          mimeType: null,
+        })),
+      };
+      const oldPath = legacyBundle.attachments[0]?.path;
+      const oldFileContents = readFileSync(String(oldPath), "utf8");
+
+      await actualFsPromises.writeFile(
+        firstResult.bundleJsonPath,
+        JSON.stringify(legacyBundle, null, 2),
+      );
+
+      const { saveTelegramMessageBundle: saveWithHealManifestFailure } =
+        await loadTelegramMessageBundleModuleWithWriteFailure(
+          (targetPath) =>
+            path.dirname(targetPath) === bundleDir &&
+            path.basename(targetPath).startsWith("bundle.json."),
+          "forced heal manifest write failure",
+        );
+
+      await expect(
+        saveWithHealManifestFailure({
+          workspaceDir,
+          chatId: 90,
+          messageId: 508,
+          caption: "upgrade attachment",
+          attachments: [
+            {
+              kind: "document",
+              index: 1,
+              name: "new-name.txt",
+              mimeType: "text/plain",
+              bytes: new TextEncoder().encode("upgraded artifact"),
+            },
+          ],
+        }),
+      ).rejects.toThrow("forced heal manifest write failure");
+
+      expect(
+        JSON.parse(readFileSync(firstResult.bundleJsonPath, "utf8")) as TelegramMessageBundle,
+      ).toEqual(legacyBundle);
+      expect(readFileSync(String(oldPath), "utf8")).toBe(oldFileContents);
+      expect(existsSync(path.join(bundleDir, "1-new-name.txt"))).toBe(false);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("removes the temp manifest orphan when heal final manifest rename fails", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const firstResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 509,
+        caption: "upgrade attachment",
+        attachments: [
+          {
+            kind: "document",
+            name: "old-name.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+      });
+      const bundleDir = firstResult.bundleDir;
+      const legacyBundle = {
+        ...firstResult.bundle,
+        attachments: firstResult.bundle.attachments.map((attachment) => ({
+          ...attachment,
+          mimeType: null,
+        })),
+      };
+
+      await actualFsPromises.writeFile(
+        firstResult.bundleJsonPath,
+        JSON.stringify(legacyBundle, null, 2),
+      );
+
+      const { saveTelegramMessageBundle: saveWithHealManifestRenameFailure } =
+        await loadTelegramMessageBundleModuleWithFsOverrides({
+          rename: async (
+            fromPath: Parameters<typeof actualFsPromises.rename>[0],
+            toPath: Parameters<typeof actualFsPromises.rename>[1],
+          ) => {
+            if (
+              String(toPath) === firstResult.bundleJsonPath &&
+              path.dirname(String(fromPath)) === bundleDir &&
+              path.basename(String(fromPath)).startsWith("bundle.json.") &&
+              path.basename(String(fromPath)).endsWith(".tmp")
+            ) {
+              const error = new Error("forced heal manifest rename failure") as NodeJS.ErrnoException;
+              error.code = "EXDEV";
+              throw error;
+            }
+
+            return actualFsPromises.rename(fromPath, toPath);
+          },
+        });
+
+      await expect(
+        saveWithHealManifestRenameFailure({
+          workspaceDir,
+          chatId: 90,
+          messageId: 509,
+          caption: "upgrade attachment",
+          attachments: [
+            {
+              kind: "document",
+              index: 1,
+              name: "new-name.txt",
+              mimeType: "text/plain",
+              bytes: new TextEncoder().encode("upgraded artifact"),
+            },
+          ],
+        }),
+      ).rejects.toThrow("forced heal manifest rename failure");
+
+      expect(
+        readdirSync(bundleDir).filter(
+          (entry) => entry.startsWith("bundle.json.") && entry.endsWith(".tmp"),
+        ),
+      ).toEqual([]);
+      expect(
+        JSON.parse(readFileSync(firstResult.bundleJsonPath, "utf8")) as TelegramMessageBundle,
+      ).toEqual(legacyBundle);
+      expect(existsSync(path.join(bundleDir, "1-new-name.txt"))).toBe(false);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("reuses the winner bundle when publish hits an EEXIST race", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+    const bundleDir = path.join(workspaceDir, "inbox", "90", "700");
+    const bundleJsonPath = path.join(bundleDir, "bundle.json");
+    const winnerBundle = createBundle({
+      chatId: 90,
+      messageId: 700,
+      caption: "winner",
+      attachments: [
+        createAttachment({
+          name: "winner.txt",
+          path: path.join(bundleDir, "1-winner.txt"),
+          mimeType: "text/plain",
+          sizeBytes: 6,
+        }),
+      ],
+      failedAttachments: [],
+    });
+
+    try {
+      const { saveTelegramMessageBundle } = await loadTelegramMessageBundleModuleWithFsOverrides({
+        rename: async (
+          fromPath: Parameters<typeof actualFsPromises.rename>[0],
+          toPath: Parameters<typeof actualFsPromises.rename>[1],
+        ) => {
+          if (
+            String(toPath) === bundleDir &&
+            String(fromPath).includes(".telegram-message-bundle-")
+          ) {
+            await actualFsPromises.mkdir(bundleDir, { recursive: true });
+            await actualFsPromises.writeFile(
+              path.join(bundleDir, "1-winner.txt"),
+              new TextEncoder().encode("winner"),
+            );
+            await actualFsPromises.writeFile(bundleJsonPath, JSON.stringify(winnerBundle, null, 2));
+            const error = new Error("bundle already exists") as NodeJS.ErrnoException;
+            error.code = "EEXIST";
+            throw error;
+          }
+
+          return actualFsPromises.rename(fromPath, toPath);
+        },
+      });
+
+      const result = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 700,
+        caption: "loser",
+        attachments: [
+          {
+            kind: "document",
+            name: "loser.txt",
+            bytes: new TextEncoder().encode("loser"),
+          },
+        ],
+      });
+
+      expect(result.bundle).toEqual(winnerBundle);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("aborts publish and leaves no final bundle directory when attachment write fails", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+    const { saveTelegramMessageBundle } = await loadTelegramMessageBundleModuleWithWriteFailure(
+      (targetPath) => !path.basename(targetPath).startsWith("bundle.json."),
+      "forced attachment write failure",
+    );
+    const bundleDir = path.join(workspaceDir, "inbox", "88", "502");
+
+    try {
+      await expect(
+        saveTelegramMessageBundle({
+          workspaceDir,
+          chatId: 88,
+          messageId: 502,
+          attachments: [
+            {
+              kind: "document",
+              name: "artifact.txt",
+              bytes: new TextEncoder().encode("artifact"),
+            },
+          ],
+        }),
+      ).rejects.toThrow("forced attachment write failure");
+
+      expect(existsSync(bundleDir)).toBe(false);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("aborts publish and leaves no final bundle directory when manifest write fails", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+    const { saveTelegramMessageBundle } = await loadTelegramMessageBundleModuleWithWriteFailure(
+      (targetPath) => path.basename(targetPath).startsWith("bundle.json."),
+      "forced manifest write failure",
+    );
+    const bundleDir = path.join(workspaceDir, "inbox", "89", "503");
+
+    try {
+      await expect(
+        saveTelegramMessageBundle({
+          workspaceDir,
+          chatId: 89,
+          messageId: 503,
+          attachments: [
+            {
+              kind: "document",
+              name: "artifact.txt",
+              bytes: new TextEncoder().encode("artifact"),
+            },
+          ],
+        }),
+      ).rejects.toThrow("forced manifest write failure");
+
+      expect(existsSync(bundleDir)).toBe(false);
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("composeTelegramMessageBundlePrompt", () => {
+  test("keeps the caption-first contract while showing explicit attachment ordering", () => {
+    const prompt = composeTelegramMessageBundlePrompt(
+      createBundle({
+        attachments: [
+          createAttachment({
+            index: 2,
+            kind: "photo",
+            name: "second.jpg",
+            path: "/tmp/second.jpg",
+            mimeType: "image/jpeg",
+          }),
+          createAttachment({
+            index: 4,
+            name: "fourth.txt",
+            path: "/tmp/fourth.txt",
+            mimeType: "text/plain",
+          }),
+        ],
+        failedAttachments: [
+          createFailedAttachment({
+            index: 1,
+            name: "first.jpg",
+            reason: "download failed",
+          }),
+          createFailedAttachment({
+            index: 3,
+            name: "third.jpg",
+            reason: "download failed",
+          }),
+        ],
+      }),
+    );
+
+    expect(prompt).toMatch(/^User caption\n이 파일 검토해줘\n\nAttachments\n/m);
+    expect(prompt).toContain("2. [photo] second.jpg");
+    expect(prompt).toContain("4. [document] fourth.txt");
+    expect(prompt).toContain("1. first.jpg - download failed");
+    expect(prompt).toContain("3. third.jpg - download failed");
+
+    expect(prompt.indexOf("User caption")).toBeLessThan(prompt.indexOf("Attachments"));
+    expect(prompt.indexOf("Attachments")).toBeLessThan(prompt.indexOf("Failed attachments"));
+  });
+});

@@ -12,8 +12,9 @@ This bot runs locally on your machine and connects one Telegram chat to one pers
 - Normal Telegram messages are sent to the current Codex thread.
 - The bot keeps the session alive between messages until you reset it.
 - Only one run is allowed at a time for the chat.
+- Telegram albums are coalesced into one prepared run before Codex sees them.
 - It can also run scheduled Codex message jobs from local JSON definitions.
-- On startup it installs packaged Codex skills for cronjob creation and interactive CLI automation guidance.
+- On startup it attempts to install packaged Codex skills for cronjob creation and interactive CLI automation guidance.
 - The bot keeps an operational workspace for session state and logs, but it may still read or modify files outside that workspace if the request calls for it.
 
 ## Requirements
@@ -49,7 +50,7 @@ TELEGRAM_BOT_TOKEN을 입력하세요:
 After you enter it once, the value is saved to `~/.codex-claw/local-config.json` and reused on later runs.
 No separate configuration file is required for normal usage.
 
-On startup, the CLI also installs packaged skills to:
+On startup, the CLI also attempts to install packaged skills to:
 
 ```text
 ~/.codex/skills/codex-claw-cronjob-creator/SKILL.md
@@ -76,6 +77,51 @@ Example:
 1. `이 저장소 구조 파악해줘`
 2. `그럼 다음으로 테스트부터 돌려봐`
 3. `방금 수정한 내용 요약해줘`
+
+## Telegram Attachments
+
+Document uploads, single photos, and media-group albums are normalized into one bundle before the runtime prepares the Codex prompt.
+
+- Telegram albums are coalesced into one prepared run keyed by the lowest message id in the media group.
+- The lowest message id remains the inbox bundle directory id even if a later album item provides the caption.
+- Failed downloads do not discard the whole bundle. Successful attachments stay in the prompt, and failed ones are recorded in `failedAttachments`.
+- If every download fails, the runtime still prepares one Codex turn using the user caption or the default attachment request plus failure metadata.
+- Late album items that arrive during the tombstone window are ignored, and items that arrive after that window are treated as a new delivery attempt instead of being appended to the already finalized bundle.
+
+Attachment bundles are written under the fixed workspace inbox:
+
+```text
+~/.codex-claw/workspace/inbox/<chatId>/<messageId>/bundle.json
+```
+
+The inbox metadata format is v2. The saved `bundle.json` and the prepared prompt both reflect the same attachment ordering and the same `failedAttachments` entries.
+
+Example `bundle.json`:
+
+```json
+{
+  "version": 2,
+  "chatId": 123,
+  "messageId": 456,
+  "mediaGroupId": "album-1",
+  "caption": "Check what arrived and what failed.",
+  "attachments": [
+    {
+      "index": 2,
+      "kind": "photo",
+      "name": "album-second.jpg",
+      "path": "/home/me/.codex-claw/workspace/inbox/123/456/2-album-second.jpg"
+    }
+  ],
+  "failedAttachments": [
+    {
+      "index": 1,
+      "name": "album-first.jpg",
+      "reason": "download failed"
+    }
+  ]
+}
+```
 
 ## Scheduled Jobs
 
@@ -112,11 +158,12 @@ Notes:
 - Scheduled jobs run in fresh Codex threads, separate from the active Telegram chat thread.
 - Cron results may still notify the persisted Telegram chat even though the Codex execution happens in a fresh thread.
 - A delivery failure does not mean the scheduled prompt did not run; execution and delivery are tracked separately.
-- If there is no persisted target chat yet, the cron job will skip instead of sending a notification.
+- If there is no persisted target chat yet, the cron job will skip execution entirely instead of running without a delivery target.
 - If an interactive run is currently active, the cron job will skip that scheduled minute instead of competing with the live turn.
 
 ## Commands
 
+- `/start` shows the same quick help as `/help`.
 - `/status` shows whether the persistent Codex thread is idle or running.
 - `/reset` clears the current session after the active run has stopped.
 - `/abort` requests cancellation for the active run.
