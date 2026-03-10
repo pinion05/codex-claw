@@ -37,7 +37,7 @@ describe("telegram inbox", () => {
       });
 
       expect(result.savedPath.startsWith(resolveTelegramInboxDir(workspaceDir, 123n))).toBe(true);
-      expect(path.basename(result.savedPath)).toBe("20260310T041516Z-report_final.pdf");
+      expect(path.basename(result.savedPath)).toBe("20260310T041516Z-file_1-report_final.pdf");
       expect(statSync(result.savedPath).isFile()).toBe(true);
       expect(readFileSync(result.savedPath, "utf8")).toBe("hello world");
       expect(result.prompt).toContain("Saved file path:");
@@ -75,6 +75,56 @@ describe("telegram inbox", () => {
       ).rejects.toThrow("Document exceeds the 20 MB Telegram download limit.");
 
       expect(getFile).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects when Telegram does not return a downloadable file path", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-inbox-"));
+
+    try {
+      await expect(
+        receiveTelegramDocument({
+          workspaceDir,
+          chatId: 123n,
+          botToken: "token-123",
+          document: {
+            fileId: "file_missing_path",
+            fileName: "report.pdf",
+          },
+          getFile: async () => ({}),
+        }),
+      ).rejects.toThrow("Telegram did not return a downloadable file path.");
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects when Telegram file download returns a non-success status", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-inbox-"));
+
+    try {
+      await expect(
+        receiveTelegramDocument({
+          workspaceDir,
+          chatId: 123n,
+          botToken: "token-123",
+          document: {
+            fileId: "file_failed_download",
+            fileName: "report.pdf",
+          },
+          getFile: async () => ({
+            file_path: "documents/file_failed_download.pdf",
+          }),
+          fetchFn: mock(
+            async (_url: string | URL | Request) =>
+              new Response("not found", {
+                status: 404,
+              }),
+          ) as unknown as typeof fetch,
+        }),
+      ).rejects.toThrow("Telegram download failed with status 404.");
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });
     }

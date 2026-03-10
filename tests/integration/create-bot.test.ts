@@ -256,4 +256,53 @@ describe("createBotHandlers", () => {
     expect(handlers.runTurn).toHaveBeenCalledWith(123n, "document prompt");
     expect(replies[0]).toContain("done");
   });
+
+  test("replies with a document receive failure and does not start a run", async () => {
+    const replies: string[] = [];
+    const handlers = {
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn: mock(async () => ({ summary: "done" })),
+    };
+    const receiveIncomingDocument = mock(async () => {
+      throw new Error("Document exceeds the 20 MB Telegram download limit.");
+    });
+    const listeners = new Map<string, (ctx: any) => Promise<void>>();
+    const bot = {
+      on(filter: string, handler: (ctx: any) => Promise<void>) {
+        listeners.set(filter, handler);
+        return this;
+      },
+    };
+
+    registerBotHandlers(bot as never, handlers, {
+      receiveIncomingDocument,
+    });
+
+    await listeners.get("message:document")?.({
+      chat: { id: 123 },
+      message: {
+        caption: null,
+        document: {
+          file_id: "file_oversized",
+          file_name: "oversized.pdf",
+          file_size: 21 * 1024 * 1024,
+          mime_type: "application/pdf",
+        },
+      },
+      getFile: async () => ({
+        file_path: "documents/file_oversized.pdf",
+      }),
+      replyWithChatAction: async () => undefined,
+      reply: async (value: string) => {
+        replies.push(value);
+      },
+    });
+
+    expect(handlers.runTurn).not.toHaveBeenCalled();
+    expect(replies).toEqual([
+      "Could not receive the document: Document exceeds the 20 MB Telegram download limit.",
+    ]);
+  });
 });

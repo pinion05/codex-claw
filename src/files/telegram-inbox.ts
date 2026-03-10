@@ -57,7 +57,7 @@ export async function receiveTelegramDocument({
   }
 
   const inboxDir = resolveTelegramInboxDir(workspaceDir, chatId);
-  const savedPath = path.join(inboxDir, buildSavedFileName(document.fileName, now));
+  const savedPath = path.join(inboxDir, buildSavedFileName(document.fileId, document.fileName, now));
   const response = await fetchFn(
     new URL(`https://api.telegram.org/file/bot${botToken}/${remoteFilePath}`),
   );
@@ -84,11 +84,12 @@ export async function receiveTelegramDocument({
   };
 }
 
-function buildSavedFileName(fileName: string | null | undefined, now: Date): string {
+function buildSavedFileName(fileId: string, fileName: string | null | undefined, now: Date): string {
   const timestamp = now.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "Z");
   const safeBaseName = sanitizeFileName(fileName);
+  const safeFileId = fileId.replace(/[^A-Za-z0-9._-]/g, "_");
 
-  return `${timestamp}-${safeBaseName}`;
+  return `${timestamp}-${safeFileId}-${safeBaseName}`;
 }
 
 function sanitizeFileName(fileName: string | null | undefined): string {
