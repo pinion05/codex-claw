@@ -330,6 +330,10 @@ describe("createCronRuntime dispatch", () => {
 
       await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
 
+      expect(runTurn).toHaveBeenCalledWith({
+        threadId: null,
+        prompt: "Summarize the latest workspace changes.",
+      });
       expect(deliverCronResult).toHaveBeenCalledWith(123n, formatCronCompletedMessage("done"));
     } finally {
       rmSync(root, { force: true, recursive: true });
@@ -433,6 +437,75 @@ describe("createCronRuntime dispatch", () => {
             chatId: "123",
             threadId: "thread_1",
             error: null,
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  test("writes separate execution and failed delivery logs when notification delivery fails", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const logger = createRunLogger(root);
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: [],
+    }));
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time: "09:00",
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: { runTurn },
+        resolveCronTargetChatId: async () => 123n,
+        isInteractiveRunActive: async () => false,
+        deliverCronResult: async () => {
+          throw new Error("delivery failed");
+        },
+        logCronExecution: logger.writeCronLog,
+      });
+
+      await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
+
+      const logFiles = listLogFiles(root);
+      expect(logFiles).toHaveLength(2);
+
+      const entries = logFiles.map((filePath) =>
+        JSON.parse(readFileSync(filePath, "utf8")) as Record<string, unknown>,
+      );
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            jobId: "daily-summary",
+            phase: "execution",
+            status: "completed",
+            chatId: "123",
+            threadId: "thread_1",
+            error: null,
+          }),
+          expect.objectContaining({
+            jobId: "daily-summary",
+            phase: "delivery",
+            status: "failed",
+            chatId: "123",
+            threadId: "thread_1",
+            error: { message: "delivery failed" },
           }),
         ]),
       );
