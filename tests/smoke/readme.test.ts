@@ -12,6 +12,7 @@ describe("README", () => {
     expect(readme).toContain("입력하세요");
     expect(readme).toContain("codex-claw-agentty");
     expect(readme).toContain("npx -y agentty-cli");
+    expect(readme).toContain("/start");
     expect(readme).toContain("/status");
     expect(readme).toContain("/reset");
     expect(readme).toContain("/abort");
@@ -19,6 +20,12 @@ describe("README", () => {
     expect(readme).toContain("~/.codex-claw/workspace");
     expect(readme).toContain("fixed workspace");
     expect(readme).toContain("persisted Telegram chat");
+    expect(readme).toContain("Telegram albums are coalesced into one prepared run");
+    expect(readme).toContain("lowest message id");
+    expect(readme).toContain("failedAttachments");
+    expect(readme).toContain("bundle.json");
+    expect(readme).toContain("\"version\": 2");
+    expect(readme).toContain("Failed downloads do not discard the whole bundle");
     expect(readme).toContain("delivery failure does not mean");
     expect(readme).toContain("If there is no persisted target chat yet, the cron job will skip instead of sending a notification.");
     expect(readme).toContain("If an interactive run is currently active, the cron job will skip that scheduled minute instead of competing with the live turn.");
