@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { createBotHandlers } from "../../src/bot/create-bot";
+import { createBotHandlers, registerBotHandlers } from "../../src/bot/create-bot";
 
 describe("createBotHandlers", () => {
   test("routes /status to the formatter and normal text to the runtime", async () => {
@@ -175,5 +175,85 @@ describe("createBotHandlers", () => {
     });
 
     expect(events).toEqual(["start", "stop", "reply:done"]);
+  });
+
+  test("runs a synthesized prompt directly through the shared prompt path", async () => {
+    const replies: string[] = [];
+    const runTurn = mock(async (_chatId: bigint, prompt: string) => ({ summary: prompt }));
+    const handlers = createBotHandlers({
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn,
+    });
+
+    await handlers.onPrompt({
+      chatId: 123n,
+      prompt: "document prompt",
+      reply: async (value: string) => {
+        replies.push(value);
+      },
+    });
+
+    expect(runTurn).toHaveBeenCalledWith(123n, "document prompt");
+    expect(replies[0]).toContain("document prompt");
+  });
+
+  test("registers document uploads and forwards the synthesized prompt to the runtime", async () => {
+    const replies: string[] = [];
+    const handlers = {
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn: mock(async () => ({ summary: "done" })),
+    };
+    const receiveIncomingDocument = mock(async () => ({
+      prompt: "document prompt",
+    }));
+    const listeners = new Map<string, (ctx: any) => Promise<void>>();
+    const bot = {
+      on(filter: string, handler: (ctx: any) => Promise<void>) {
+        listeners.set(filter, handler);
+        return this;
+      },
+    };
+
+    registerBotHandlers(bot as never, handlers, {
+      receiveIncomingDocument,
+    });
+
+    await listeners.get("message:document")?.({
+      chat: { id: 123 },
+      message: {
+        caption: "summarize this",
+        document: {
+          file_id: "file_1",
+          file_name: "report.pdf",
+          file_size: 12,
+          mime_type: "application/pdf",
+        },
+      },
+      getFile: async () => ({
+        file_path: "documents/file_1.pdf",
+      }),
+      replyWithChatAction: async () => undefined,
+      reply: async (value: string) => {
+        replies.push(value);
+      },
+    });
+
+    expect(receiveIncomingDocument).toHaveBeenCalledWith({
+      chatId: 123n,
+      caption: "summarize this",
+      document: {
+        fileId: "file_1",
+        fileName: "report.pdf",
+        fileSize: 12,
+        mimeType: "application/pdf",
+      },
+      getFile: expect.any(Function),
+    });
+    expect(handlers.runTurn).toHaveBeenCalledWith(123n, "document prompt");
+    expect(replies[0]).toContain("done");
   });
 });
