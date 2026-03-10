@@ -3,7 +3,6 @@ import { registerBotHandlers } from "./bot/create-bot";
 import { createLocalConfigStore } from "./config/local-config";
 import { promptForTelegramBotToken, resolveTelegramBotTokenWithStore } from "./config/telegram-bot-token";
 import { loadConfig } from "./config";
-import { receiveTelegramDocument } from "./files/telegram-inbox";
 import { createRuntimeDeps } from "./runtime/create-runtime-deps";
 import { ensureWorkspaceDirectories } from "./runtime/workspace";
 
@@ -33,19 +32,7 @@ export async function main(): Promise<void> {
     console.error(`[codex-claw] update ${error.ctx.update.update_id} failed`, error.error);
   });
 
-  registerBotHandlers(bot, handlers, {
-    receiveIncomingDocument: async (input) =>
-      receiveTelegramDocument({
-        workspaceDir: config.workspaceDir,
-        chatId: input.chatId,
-        botToken: telegramToken.token,
-        document: {
-          ...input.document,
-          caption: input.caption,
-        },
-        getFile: input.getFile,
-      }),
-  });
+  registerBotHandlers(bot, handlers);
 
   if (telegramToken.source === "prompt") {
     console.info(`[codex-claw] saved TELEGRAM_BOT_TOKEN to ${localConfigStore.path}`);

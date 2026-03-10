@@ -9,7 +9,6 @@
 This bot runs locally on your machine and connects one Telegram chat to one persistent Codex thread.
 
 - Normal Telegram messages are sent to the current Codex thread.
-- Telegram document uploads are saved under the workspace inbox and forwarded to Codex as local file paths.
 - The bot keeps the session alive between messages until you reset it.
 - Only one run is allowed at a time for the chat.
 - It can also run scheduled Codex message jobs from local JSON definitions.
@@ -70,20 +69,6 @@ Example prompts:
 - `이 경로의 파일들을 보고 다음 작업 계획 세워줘: /Users/me/project`
 
 The bot will keep using the same Codex thread for follow-up messages in that chat.
-
-You can also upload a Telegram document. The bot stores it under:
-
-```text
-~/.codex-claw/workspace/inbox/<chatId>/
-```
-
-and then passes the saved local file path and file metadata to Codex in the next turn.
-
-Current file intake policy:
-
-- Only Telegram `document` uploads are supported in the first version.
-- Files are stored under the per-chat inbox inside the workspace.
-- The current receive path follows Telegram's bot download limit of up to 20 MB.
 
 Example:
 
