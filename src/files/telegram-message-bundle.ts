@@ -348,7 +348,9 @@ async function tryReadExistingTelegramMessageBundle(
   }
 
   const bundleJsonPath = path.join(bundleDir, "bundle.json");
-  const bundle = normalizeTelegramMessageBundle(JSON.parse(await readFile(bundleJsonPath, "utf8")));
+  const bundle = await materializeSavedTelegramMessageBundle(
+    normalizeTelegramMessageBundle(JSON.parse(await readFile(bundleJsonPath, "utf8"))),
+  );
 
   return {
     bundleDir,
@@ -412,6 +414,42 @@ async function cleanupTelegramMessageBundleStagingDirectory(stagingDir: string):
   try {
     await rm(stagingDir, { force: true, recursive: true });
   } catch {}
+}
+
+async function materializeSavedTelegramMessageBundle(
+  bundle: TelegramMessageBundle,
+): Promise<TelegramMessageBundle> {
+  const attachments: TelegramMessageAttachment[] = [];
+  const failedAttachments = new Map(
+    bundle.failedAttachments.map((attachment) => [attachment.index, attachment]),
+  );
+
+  for (const attachment of bundle.attachments) {
+    try {
+      await stat(attachment.path);
+      attachments.push(attachment);
+    } catch (error) {
+      if (!isMissingFileError(error)) {
+        throw error;
+      }
+
+      failedAttachments.set(attachment.index, {
+        index: attachment.index,
+        name: attachment.name,
+        reason: "stored attachment missing from disk",
+      });
+    }
+  }
+
+  for (const attachment of attachments) {
+    failedAttachments.delete(attachment.index);
+  }
+
+  return {
+    ...bundle,
+    attachments,
+    failedAttachments: [...failedAttachments.values()].sort((left, right) => left.index - right.index),
+  };
 }
 
 function pickLargestPhotoVariant(

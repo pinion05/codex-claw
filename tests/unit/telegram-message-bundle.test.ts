@@ -259,6 +259,7 @@ describe("saveTelegramMessageBundle", () => {
 
     try {
       await actualFsPromises.mkdir(bundleDir, { recursive: true });
+      await actualFsPromises.writeFile(path.join(bundleDir, "1-artifact.txt"), "artifact");
       await actualFsPromises.writeFile(
         bundleJsonPath,
         JSON.stringify({
@@ -390,6 +391,55 @@ describe("saveTelegramMessageBundle", () => {
       expect(prompt).toContain("1. [document] artifact.txt");
       expect(prompt).toContain("2. [document] missing.txt");
       expect(prompt).toContain("Failed attachments\nNone");
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("heals a stale saved bundle when the manifest points at a missing attachment file", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+
+    try {
+      const firstResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 5041,
+        caption: "restore attachment",
+        attachments: [
+          {
+            kind: "document",
+            name: "artifact.txt",
+            bytes: new TextEncoder().encode("first artifact"),
+          },
+        ],
+        failedAttachments: [],
+      });
+
+      const firstAttachmentPath = firstResult.bundle.attachments[0]?.path;
+      rmSync(String(firstAttachmentPath));
+
+      const secondResult = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 5041,
+        caption: "restore attachment",
+        attachments: [
+          {
+            kind: "document",
+            name: "artifact.txt",
+            bytes: new TextEncoder().encode("healed artifact"),
+          },
+        ],
+        failedAttachments: [],
+      });
+
+      expect(secondResult.bundle.attachments).toHaveLength(1);
+      expect(secondResult.bundle.failedAttachments).toEqual([]);
+      expect(existsSync(String(secondResult.bundle.attachments[0]?.path))).toBe(true);
+      expect(readFileSync(String(secondResult.bundle.attachments[0]?.path), "utf8")).toBe(
+        "healed artifact",
+      );
       expectNoStagingResidue(workspaceDir);
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });
@@ -809,6 +859,10 @@ describe("saveTelegramMessageBundle", () => {
             String(fromPath).includes(".telegram-message-bundle-")
           ) {
             await actualFsPromises.mkdir(bundleDir, { recursive: true });
+            await actualFsPromises.writeFile(
+              path.join(bundleDir, "1-winner.txt"),
+              new TextEncoder().encode("winner"),
+            );
             await actualFsPromises.writeFile(bundleJsonPath, JSON.stringify(winnerBundle, null, 2));
             const error = new Error("bundle already exists") as NodeJS.ErrnoException;
             error.code = "EEXIST";

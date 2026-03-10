@@ -256,6 +256,7 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
 
           if (result.kind === "ignored") {
             attachmentContexts.delete(key);
+            await ctx.reply(buildIgnoredAlbumItemMessage());
           }
 
           return;
@@ -292,6 +293,7 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
 
           if (result.kind === "ignored") {
             attachmentContexts.delete(key);
+            await ctx.reply(buildIgnoredAlbumItemMessage());
           }
 
           return;
@@ -321,6 +323,10 @@ function buildHelpMessage(): string {
   return ["Send a prompt to run Codex.", "Available commands: /start /status /reset /abort /help"].join(
     "\n",
   );
+}
+
+function buildIgnoredAlbumItemMessage(): string {
+  return "This album item arrived too late and was skipped. Please resend the full album if you want me to process it.";
 }
 
 function isAbortError(error: unknown): boolean {

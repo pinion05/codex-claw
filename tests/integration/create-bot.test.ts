@@ -968,7 +968,7 @@ describe("registerBotHandlers", () => {
     expect(replies).toEqual(["done"]);
   });
 
-  test("late album arrivals are ignored after the first finalized run", async () => {
+  test("late album arrivals reply with an explicit skipped notice after the first finalized run", async () => {
     const bot = new FakeBot();
     const replies: string[] = [];
     const scheduler = new FakeScheduler();
@@ -1014,7 +1014,10 @@ describe("registerBotHandlers", () => {
 
     expect(prepareAttachments).toHaveBeenCalledTimes(1);
     expect(runTurn).toHaveBeenCalledTimes(1);
-    expect(replies).toEqual(["done"]);
+    expect(replies).toEqual([
+      "done",
+      "This album item arrived too late and was skipped. Please resend the full album if you want me to process it.",
+    ]);
   });
 
   test("prepare failures reply with an error and skip runTurn", async () => {
