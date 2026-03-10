@@ -21,6 +21,7 @@ type CronExecutionEvent = {
   jobId: string;
   phase: "execution" | "delivery" | "skip";
   status: "completed" | "failed" | "skipped";
+  reason?: string;
   chatId?: bigint | null;
   threadId?: string | null;
   error?: string | null;
@@ -71,7 +72,9 @@ export function createRuntimeDeps(
     deliverCronResult: async (chatId, text) => {
       await integrations.sendTelegramMessage?.(chatId, text);
     },
-    logCronExecution: async (_event) => undefined,
+    logCronExecution: async (event) => {
+      await logger.writeCronLog?.(event);
+    },
   };
   const cronRuntime = (overrides.createCronRuntimeFn ?? createCronRuntime)(cronRuntimeArgs);
   let cronStarted = false;

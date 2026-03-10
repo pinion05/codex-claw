@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createCronRuntime } from "../../src/cron/runtime";
@@ -179,6 +179,33 @@ describe("createRuntimeDeps cron wiring", () => {
 
       await cronArgs?.deliverCronResult(123n, "cron result");
       expect(sendTelegramMessage).toHaveBeenCalledWith(123n, "cron result");
+
+      await cronArgs?.logCronExecution({
+        jobId: "daily-summary",
+        phase: "skip",
+        status: "skipped",
+        reason: "no-target-chat",
+        chatId: null,
+        threadId: null,
+        error: null,
+      });
+
+      const yearDir = readdirSync(path.join(workspaceDir, "logs"))[0];
+      const monthDir = readdirSync(path.join(workspaceDir, "logs", yearDir!))[0];
+      const dayDir = readdirSync(path.join(workspaceDir, "logs", yearDir!, monthDir!))[0];
+      const logDir = path.join(workspaceDir, "logs", yearDir!, monthDir!, dayDir!);
+      const logFile = readdirSync(logDir)[0];
+      const entry = JSON.parse(readFileSync(path.join(logDir, logFile!), "utf8")) as Record<string, unknown>;
+
+      expect(entry).toMatchObject({
+        jobId: "daily-summary",
+        phase: "skip",
+        status: "skipped",
+        reason: "no-target-chat",
+        chatId: null,
+        threadId: null,
+        error: null,
+      });
 
       expect(start).toHaveBeenCalledTimes(1);
 
