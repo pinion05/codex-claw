@@ -18,7 +18,7 @@ describe("README", () => {
     expect(readme).toContain("fixed workspace");
     expect(readme).toContain("persisted Telegram chat");
     expect(readme).toContain("delivery failure does not mean");
-    expect(readme).toContain("skip");
+    expect(readme).toContain("If there is no persisted target chat yet, the cron job will skip instead of sending a notification.");
     expect(readme).toContain("## Publishing");
     expect(readme).toContain("bun run check");
     expect(readme).toContain("bun run publish:dry-run");

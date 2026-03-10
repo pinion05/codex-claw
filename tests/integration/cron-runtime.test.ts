@@ -455,4 +455,31 @@ describe("createCronRuntime dispatch", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  test("preserves null chat ids when serializing cron logs", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-runtime-"));
+    const logger = createRunLogger(root);
+
+    try {
+      await logger.writeCronLog?.({
+        jobId: "daily-summary",
+        phase: "skip",
+        status: "skipped",
+        reason: "no-target-chat",
+        chatId: null,
+        threadId: null,
+        error: null,
+        loggedAt: "2026-03-10T01:00:00.000Z",
+      });
+
+      const logFiles = listLogFiles(root);
+      expect(logFiles).toHaveLength(1);
+
+      const entry = JSON.parse(readFileSync(logFiles[0]!, "utf8")) as Record<string, unknown>;
+
+      expect(entry.chatId).toBeNull();
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });

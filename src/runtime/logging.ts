@@ -97,7 +97,7 @@ export async function writeCronLog({
     phase,
     status,
     reason,
-    chatId: chatId === undefined ? null : String(chatId),
+    chatId: chatId == null ? null : String(chatId),
     threadId: threadId ?? null,
     error: error === undefined || error === null ? null : { message: error },
     loggedAt,
