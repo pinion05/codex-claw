@@ -18,9 +18,12 @@ export async function ensureWorkspaceDirectories(
   } = {},
 ): Promise<void> {
   await Promise.all(
-    [workspaceDir, path.join(workspaceDir, "state"), path.join(workspaceDir, "logs")].map(
-      (directory) => mkdir(directory, { recursive: true }),
-    ),
+    [
+      workspaceDir,
+      path.join(workspaceDir, "state"),
+      path.join(workspaceDir, "logs"),
+      path.join(workspaceDir, "inbox"),
+    ].map((directory) => mkdir(directory, { recursive: true })),
   );
 
   const packagedSkillInstallers = options.packagedSkillInstallers ?? [

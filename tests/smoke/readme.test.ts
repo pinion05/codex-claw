@@ -12,6 +12,8 @@ describe("README", () => {
     expect(readme).toContain("입력하세요");
     expect(readme).toContain("codex-claw-agentty");
     expect(readme).toContain("npx -y agentty-cli");
+    expect(readme).toContain("workspace/inbox");
+    expect(readme).toContain("Telegram document");
     expect(readme).toContain("/status");
     expect(readme).toContain("/reset");
     expect(readme).toContain("/abort");
