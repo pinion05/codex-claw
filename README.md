@@ -12,7 +12,7 @@ This bot runs locally on your machine and connects one Telegram chat to one pers
 - The bot keeps the session alive between messages until you reset it.
 - Only one run is allowed at a time for the chat.
 - It can also run scheduled Codex message jobs from local JSON definitions.
-- On startup it installs a packaged Codex skill for creating those cronjob definitions.
+- On startup it installs packaged Codex skills for cronjob creation and interactive CLI automation guidance.
 - The bot keeps an operational workspace for session state and logs, but it may still read or modify files outside that workspace if the request calls for it.
 
 ## Requirements
@@ -48,13 +48,14 @@ TELEGRAM_BOT_TOKEN을 입력하세요:
 After you enter it once, the value is saved to `~/.codex-claw/local-config.json` and reused on later runs.
 No separate configuration file is required for normal usage.
 
-On startup, the CLI also installs the packaged cronjob creator skill to:
+On startup, the CLI also installs packaged skills to:
 
 ```text
 ~/.codex/skills/codex-claw-cronjob-creator/SKILL.md
+~/.codex/skills/codex-claw-agentty/SKILL.md
 ```
 
-That skill can be used by Codex to create scheduled job definition files.
+Those skills can be used by Codex to create scheduled job definition files and to prefer `npx -y agentty-cli` for interactive CLI login and approval flows.
 
 ## Telegram Usage
 
