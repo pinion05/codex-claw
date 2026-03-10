@@ -33,7 +33,6 @@ type CronExecutionEvent = {
 
 type CronRuntimeWiringArgs = Parameters<typeof createCronRuntime>[0] & {
   resolveCronTargetChatId: () => Promise<bigint | null>;
-  isInteractiveRunActive: () => Promise<boolean>;
   deliverCronResult?: SendTelegramMessage;
   logCronExecution: (event: CronExecutionEvent) => Promise<void> | void;
 };
@@ -85,21 +84,6 @@ export function createRuntimeDeps(
       }
 
       return parseCronTargetChatId(session.chatId);
-    },
-    isInteractiveRunActive: async () => {
-      const session = await readCronTargetSession();
-
-      if (!session) {
-        return false;
-      }
-
-      const chatId = parseCronTargetChatId(session.chatId);
-
-      if (chatId === null) {
-        return false;
-      }
-
-      return (await runtime.getSession(chatId)).isRunning;
     },
     logCronExecution: async (event) => {
       await logger.writeCronLog?.(event);

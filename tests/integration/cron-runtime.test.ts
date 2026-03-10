@@ -223,7 +223,6 @@ describe("createCronRuntime dispatch", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => null,
-        isInteractiveRunActive: async () => false,
         deliverCronResult,
         logCronExecution,
       });
@@ -245,7 +244,7 @@ describe("createCronRuntime dispatch", () => {
     }
   });
 
-  test("skips execution and logs when an interactive run is active", async () => {
+  test("executes and delivers even when an interactive run is active", async () => {
     const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
     const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
     const runTurn = mock(async () => ({
@@ -274,21 +273,32 @@ describe("createCronRuntime dispatch", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => 123n,
-        isInteractiveRunActive: async () => true,
         deliverCronResult,
         logCronExecution,
       });
 
       await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
 
-      expect(runTurn).not.toHaveBeenCalled();
-      expect(deliverCronResult).not.toHaveBeenCalled();
-      expect(logCronExecution).toHaveBeenCalledWith(
+      expect(runTurn).toHaveBeenCalledWith({
+        threadId: null,
+        prompt: "Summarize the latest workspace changes.",
+      });
+      expect(deliverCronResult).toHaveBeenCalledWith(123n, formatCronCompletedMessage("done"));
+      expect(logCronExecution).not.toHaveBeenCalledWith(
         expect.objectContaining({
           jobId: "daily-summary",
           phase: "skip",
           status: "skipped",
           reason: "interactive-run-active",
+        }),
+      );
+      expect(logCronExecution).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobId: "daily-summary",
+          phase: "execution",
+          status: "completed",
+          chatId: 123n,
+          threadId: "thread_1",
         }),
       );
     } finally {
@@ -324,7 +334,6 @@ describe("createCronRuntime dispatch", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => 123n,
-        isInteractiveRunActive: async () => false,
         deliverCronResult,
       });
 
@@ -368,7 +377,6 @@ describe("createCronRuntime dispatch", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => 123n,
-        isInteractiveRunActive: async () => false,
         deliverCronResult,
       });
 
@@ -408,7 +416,6 @@ describe("createCronRuntime dispatch", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => 123n,
-        isInteractiveRunActive: async () => false,
         deliverCronResult: async () => undefined,
         logCronExecution: logger.writeCronLog,
       });
@@ -473,7 +480,6 @@ describe("createCronRuntime dispatch", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => 123n,
-        isInteractiveRunActive: async () => false,
         deliverCronResult: async () => {
           throw new Error("delivery failed");
         },
@@ -543,7 +549,6 @@ describe("createCronRuntime dispatch", () => {
           }),
         },
         resolveCronTargetChatId: async () => null,
-        isInteractiveRunActive: async () => false,
         deliverCronResult: async () => undefined,
         logCronExecution: logger.writeCronLog,
       });

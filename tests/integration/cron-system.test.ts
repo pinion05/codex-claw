@@ -152,7 +152,6 @@ describe("createCronRuntime one-shot flow", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => 123n,
-        isInteractiveRunActive: async () => false,
         deliverCronResult,
       });
 
@@ -211,7 +210,6 @@ describe("createCronRuntime one-shot flow", () => {
         codexClawHomeDir,
         codex: { runTurn },
         resolveCronTargetChatId: async () => 123n,
-        isInteractiveRunActive: async () => false,
         logCronExecution,
         onBackgroundError,
       });

@@ -53,7 +53,8 @@ export function createCronRuntime({
   dispatchPrompt,
   codex,
   resolveCronTargetChatId,
-  isInteractiveRunActive,
+  // Backward-compatible no-op: interactive runs no longer gate cron execution.
+  isInteractiveRunActive: _isInteractiveRunActive,
   deliverCronResult,
   logCronExecution,
   onBackgroundError,
@@ -136,17 +137,6 @@ export function createCronRuntime({
           phase: "skip",
           status: "skipped",
           reason: "no-target-chat",
-        });
-        return;
-      }
-
-      if ((await isInteractiveRunActive?.()) === true) {
-        await logCronEvent({
-          jobId: spec.id,
-          phase: "skip",
-          status: "skipped",
-          reason: "interactive-run-active",
-          chatId: targetChatId,
         });
         return;
       }

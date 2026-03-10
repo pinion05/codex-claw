@@ -28,7 +28,7 @@ describe("README", () => {
     expect(readme).toContain("Failed downloads do not discard the whole bundle");
     expect(readme).toContain("delivery failure does not mean");
     expect(readme).toContain("If there is no persisted target chat yet, the cron job will skip execution entirely instead of running without a delivery target.");
-    expect(readme).toContain("If an interactive run is currently active, the cron job will skip that scheduled minute instead of competing with the live turn.");
+    expect(readme).toContain("Cron jobs still run immediately and deliver to the persisted Telegram chat even if an interactive run is already active.");
     expect(readme).toContain("## Publishing");
     expect(readme).toContain("bun run check");
     expect(readme).toContain("bun run publish:dry-run");
