@@ -1,11 +1,19 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { installCronjobCreatorSkill as installCronjobCreatorSkillDefault } from "./install-codex-skill";
+import {
+  installAgenttySkill as installAgenttySkillDefault,
+  installCronjobCreatorSkill as installCronjobCreatorSkillDefault,
+} from "./install-codex-skill";
+
+type PackagedSkillInstaller = {
+  install: () => Promise<unknown>;
+  label: string;
+};
 
 export async function ensureWorkspaceDirectories(
   workspaceDir: string,
   options: {
-    installCronjobCreatorSkill?: () => Promise<unknown>;
+    packagedSkillInstallers?: PackagedSkillInstaller[];
     warn?: (message: string, error: unknown) => void;
   } = {},
 ): Promise<void> {
@@ -15,12 +23,25 @@ export async function ensureWorkspaceDirectories(
     ),
   );
 
-  try {
-    await (options.installCronjobCreatorSkill ?? installCronjobCreatorSkillDefault)();
-  } catch (error) {
-    (options.warn ?? ((message: string, cause: unknown) => console.warn(message, cause)))(
-      "[codex-claw] failed to install cronjob creator skill",
-      error,
-    );
+  const packagedSkillInstallers = options.packagedSkillInstallers ?? [
+    {
+      install: installCronjobCreatorSkillDefault,
+      label: "cronjob creator skill",
+    },
+    {
+      install: installAgenttySkillDefault,
+      label: "agentty skill",
+    },
+  ];
+
+  for (const packagedSkillInstaller of packagedSkillInstallers) {
+    try {
+      await packagedSkillInstaller.install();
+    } catch (error) {
+      (options.warn ?? ((message: string, cause: unknown) => console.warn(message, cause)))(
+        `[codex-claw] failed to install ${packagedSkillInstaller.label}`,
+        error,
+      );
+    }
   }
 }
