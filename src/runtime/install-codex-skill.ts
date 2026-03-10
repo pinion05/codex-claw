@@ -18,10 +18,18 @@ type InstallAgenttySkillOptions = {
   codexHomeDir?: string;
 };
 
+function resolveCodexHomeDir(codexHomeDir?: string): string {
+  if (codexHomeDir) {
+    return codexHomeDir;
+  }
+
+  return path.join(process.env.HOME ?? os.homedir(), ".codex");
+}
+
 export async function installPackagedSkill(
   options: InstallPackagedSkillOptions,
 ): Promise<string> {
-  const codexHomeDir = options.codexHomeDir ?? path.join(os.homedir(), ".codex");
+  const codexHomeDir = resolveCodexHomeDir(options.codexHomeDir);
   const targetDir = path.join(codexHomeDir, "skills", options.skillName);
   const targetPath = path.join(targetDir, "SKILL.md");
   const skillContent = await readFile(options.packagedSkillPath, "utf8");

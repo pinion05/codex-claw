@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +8,17 @@ import {
   installPackagedSkill,
 } from "../../src/runtime/install-codex-skill";
 import { ensureWorkspaceDirectories } from "../../src/runtime/workspace";
+
+const originalHome = process.env.HOME;
+
+afterEach(() => {
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+    return;
+  }
+
+  process.env.HOME = originalHome;
+});
 
 describe("installPackagedSkill", () => {
   test("installs a packaged skill into the global Codex skills directory", async () => {
@@ -122,6 +133,32 @@ describe("installAgenttySkill", () => {
 });
 
 describe("ensureWorkspaceDirectories", () => {
+  test("installs both packaged skills through the default startup path", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-workspace-"));
+    const workspaceDir = path.join(root, "workspace");
+    const cronSkillPath = path.join(
+      root,
+      ".codex",
+      "skills",
+      "codex-claw-cronjob-creator",
+      "SKILL.md",
+    );
+    const agenttySkillPath = path.join(root, ".codex", "skills", "codex-claw-agentty", "SKILL.md");
+
+    try {
+      process.env.HOME = root;
+
+      await ensureWorkspaceDirectories(workspaceDir);
+
+      expect(statSync(cronSkillPath).isFile()).toBe(true);
+      expect(statSync(agenttySkillPath).isFile()).toBe(true);
+      expect(readFileSync(cronSkillPath, "utf8")).toContain("name: codex-claw-cronjob-creator");
+      expect(readFileSync(agenttySkillPath, "utf8")).toContain("name: codex-claw-agentty");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   test("creates the runtime workspace directories", async () => {
     const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-workspace-"));
     const installCronjobCreatorSkill = mock(async () => undefined);
