@@ -90,7 +90,7 @@ describe("createRuntimeDeps cron wiring", () => {
       | {
           resolveCronTargetChatId: () => Promise<bigint | null>;
           isInteractiveRunActive: () => Promise<boolean>;
-          deliverCronResult: (chatId: bigint, text: string) => Promise<void>;
+          deliverCronResult?: (chatId: bigint, text: string) => Promise<void>;
           logCronExecution: (event: Record<string, unknown>) => Promise<void>;
         }
       | undefined;
@@ -177,7 +177,8 @@ describe("createRuntimeDeps cron wiring", () => {
       await expect(cronArgs?.resolveCronTargetChatId()).resolves.toBe(123n);
       await expect(cronArgs?.isInteractiveRunActive()).resolves.toBe(false);
 
-      await cronArgs?.deliverCronResult(123n, "cron result");
+      expect(cronArgs?.deliverCronResult).toBeDefined();
+      await cronArgs!.deliverCronResult!(123n, "cron result");
       expect(sendTelegramMessage).toHaveBeenCalledWith(123n, "cron result");
 
       await cronArgs?.logCronExecution({
@@ -295,6 +296,148 @@ describe("createRuntimeDeps cron wiring", () => {
       ) as Record<string, unknown>;
 
       expect(persistedSession.isRunning).toBe(false);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("treats malformed persisted sessions as missing cron targets", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-"));
+    let cronArgs:
+      | {
+          resolveCronTargetChatId: () => Promise<bigint | null>;
+          isInteractiveRunActive: () => Promise<boolean>;
+        }
+      | undefined;
+    const createCronRuntimeFn = mock((options) => {
+      cronArgs = options;
+
+      return {
+        syncNow: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        refresh: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        tick: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        start: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        stop: mock(() => undefined),
+        getRegisteredJobIds: mock(() => []),
+      };
+    });
+
+    try {
+      mkdirSync(path.join(workspaceDir, "state"), { recursive: true });
+      await Bun.write(
+        path.join(workspaceDir, "state", "session.json"),
+        JSON.stringify({
+          chatId: "not-a-bigint",
+          threadId: "thread_1",
+          isRunning: true,
+          lastStartedAt: "2026-03-10T00:00:00.000Z",
+          lastCompletedAt: null,
+          lastSummary: "running",
+          logFile: null,
+        }),
+      );
+
+      const deps = createRuntimeDeps(
+        {
+          telegramBotToken: null,
+          openAiApiKey: null,
+          workspaceDir,
+        },
+        {
+          createSdkRuntimeClientFn: () => ({
+            runTurn: mock(async () => ({
+              threadId: "thread_1",
+              summary: "done",
+              touchedPaths: [],
+            })),
+          }),
+          createCronRuntimeFn,
+        },
+      );
+
+      await deps.startCronRuntime();
+
+      await expect(cronArgs?.resolveCronTargetChatId()).resolves.toBeNull();
+      await expect(cronArgs?.isInteractiveRunActive()).resolves.toBe(false);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("omits the cron delivery hook when no Telegram sender is wired", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-"));
+    let cronArgs:
+      | {
+          deliverCronResult?: (chatId: bigint, text: string) => Promise<void>;
+        }
+      | undefined;
+    const createCronRuntimeFn = mock((options) => {
+      cronArgs = options;
+
+      return {
+        syncNow: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        refresh: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        tick: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        start: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        stop: mock(() => undefined),
+        getRegisteredJobIds: mock(() => []),
+      };
+    });
+
+    try {
+      const deps = createRuntimeDeps(
+        {
+          telegramBotToken: null,
+          openAiApiKey: null,
+          workspaceDir,
+        },
+        {
+          createSdkRuntimeClientFn: () => ({
+            runTurn: mock(async () => ({
+              threadId: "thread_1",
+              summary: "done",
+              touchedPaths: [],
+            })),
+          }),
+          createCronRuntimeFn,
+        },
+      );
+
+      await deps.startCronRuntime();
+
+      expect(cronArgs?.deliverCronResult).toBeUndefined();
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });
     }

@@ -30,7 +30,7 @@ type CronExecutionEvent = {
 type CronRuntimeWiringArgs = Parameters<typeof createCronRuntime>[0] & {
   resolveCronTargetChatId: () => Promise<bigint | null>;
   isInteractiveRunActive: () => Promise<boolean>;
-  deliverCronResult: SendTelegramMessage;
+  deliverCronResult?: SendTelegramMessage;
   logCronExecution: (event: CronExecutionEvent) => Promise<void> | void;
 };
 
@@ -55,34 +55,58 @@ export function createRuntimeDeps(
     codex,
     logger,
   });
+  const readCronTargetSession = async () => {
+    try {
+      return await store.readCurrentSession();
+    } catch {
+      return null;
+    }
+  };
+  const parseCronTargetChatId = (chatId: string): bigint | null => {
+    try {
+      return BigInt(chatId);
+    } catch {
+      return null;
+    }
+  };
   const cronRuntimeArgs: CronRuntimeWiringArgs = {
     codexClawHomeDir: resolveCodexClawHomeDir(),
     workspaceDir: config.workspaceDir,
     codex,
     resolveCronTargetChatId: async () => {
-      const session = await store.readCurrentSession();
+      const session = await readCronTargetSession();
 
       if (!session) {
         return null;
       }
 
-      return BigInt(session.chatId);
+      return parseCronTargetChatId(session.chatId);
     },
     isInteractiveRunActive: async () => {
-      const session = await store.readCurrentSession();
+      const session = await readCronTargetSession();
 
       if (!session) {
         return false;
       }
 
-      return (await runtime.getSession(BigInt(session.chatId))).isRunning;
-    },
-    deliverCronResult: async (chatId, text) => {
-      await integrations.sendTelegramMessage?.(chatId, text);
+      const chatId = parseCronTargetChatId(session.chatId);
+
+      if (chatId === null) {
+        return false;
+      }
+
+      return (await runtime.getSession(chatId)).isRunning;
     },
     logCronExecution: async (event) => {
       await logger.writeCronLog?.(event);
     },
+    ...(integrations.sendTelegramMessage
+      ? {
+          deliverCronResult: async (chatId, text) => {
+            await integrations.sendTelegramMessage?.(chatId, text);
+          },
+        }
+      : {}),
   };
   const cronRuntime = (overrides.createCronRuntimeFn ?? createCronRuntime)(cronRuntimeArgs);
   let cronStarted = false;

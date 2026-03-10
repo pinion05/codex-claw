@@ -336,6 +336,46 @@ describe("createCronRuntime dispatch", () => {
     }
   });
 
+  test("uses a friendly fallback when the cron summary is empty", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: null,
+      touchedPaths: [],
+    }));
+    const deliverCronResult = mock(async (_chatId: bigint, _text: string) => undefined);
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time: "09:00",
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: { runTurn },
+        resolveCronTargetChatId: async () => 123n,
+        isInteractiveRunActive: async () => false,
+        deliverCronResult,
+      });
+
+      await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
+
+      expect(deliverCronResult).toHaveBeenCalledWith(123n, "Cron run completed.");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   test("writes structured cron logs for execution and delivery phases", async () => {
     const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
     const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
