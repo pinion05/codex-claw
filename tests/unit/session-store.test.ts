@@ -16,6 +16,12 @@ function sessionFile() {
 }
 
 describe("FileSessionStore", () => {
+  test("readCurrentSession returns null when no persisted session exists", async () => {
+    const store = new FileSessionStore(root);
+
+    await expect(store.readCurrentSession()).resolves.toBeNull();
+  });
+
   test("creates an empty session when none exists", async () => {
     const store = new FileSessionStore(root);
     const session = await store.getOrCreate(123n);
@@ -38,6 +44,29 @@ describe("FileSessionStore", () => {
     const session = await store.getOrCreate(123n);
     expect(session.threadId).toBe("thread_1");
     expect(session.isRunning).toBe(true);
+  });
+
+  test("readCurrentSession returns the validated persisted session", async () => {
+    const store = new FileSessionStore(root);
+    await store.save({
+      chatId: "123",
+      threadId: "thread_1",
+      isRunning: true,
+      lastSummary: "working",
+      lastStartedAt: "2026-03-06T00:00:00.000Z",
+      lastCompletedAt: null,
+      logFile: null,
+    });
+
+    await expect(store.readCurrentSession()).resolves.toEqual({
+      chatId: "123",
+      threadId: "thread_1",
+      isRunning: true,
+      lastSummary: "working",
+      lastStartedAt: "2026-03-06T00:00:00.000Z",
+      lastCompletedAt: null,
+      logFile: null,
+    });
   });
 
   test("reset clears a persisted session", async () => {
@@ -90,5 +119,14 @@ describe("FileSessionStore", () => {
     const store = new FileSessionStore(root);
 
     await expect(store.getOrCreate(123n)).rejects.toThrow("Invalid session file");
+  });
+
+  test("readCurrentSession preserves invalid session validation semantics", async () => {
+    mkdirSync(path.dirname(sessionFile()), { recursive: true });
+    writeFileSync(sessionFile(), JSON.stringify({ chatId: "123", threadId: null }));
+
+    const store = new FileSessionStore(root);
+
+    await expect(store.readCurrentSession()).rejects.toThrow("Invalid session file");
   });
 });

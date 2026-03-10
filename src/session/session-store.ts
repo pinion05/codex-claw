@@ -29,6 +29,10 @@ export class FileSessionStore {
     return emptySession;
   }
 
+  async readCurrentSession(): Promise<AgentSession | null> {
+    return this.read();
+  }
+
   async save(session: AgentSession): Promise<void> {
     const directory = path.dirname(this.sessionPath);
     const tempPath = path.join(directory, `${path.basename(this.sessionPath)}.${randomUUID()}.tmp`);
