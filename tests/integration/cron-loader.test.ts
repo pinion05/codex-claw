@@ -84,7 +84,16 @@ describe("createCronRuntime loading", () => {
 });
 
 describe("createRuntimeDeps cron wiring", () => {
-  test("starts the cron runtime with the shared Codex client", async () => {
+  test("starts the cron runtime with the shared Codex client and narrow cron helpers", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-"));
+    let cronArgs:
+      | {
+          resolveCronTargetChatId: () => Promise<bigint | null>;
+          isInteractiveRunActive: () => Promise<boolean>;
+          deliverCronResult: (chatId: bigint, text: string) => Promise<void>;
+          logCronExecution: (event: Record<string, unknown>) => Promise<void>;
+        }
+      | undefined;
     const start = mock(async () => ({
       registered: [],
       skippedDisabled: [],
@@ -96,7 +105,11 @@ describe("createRuntimeDeps cron wiring", () => {
       summary: "done",
       touchedPaths: [],
     }));
-    const createCronRuntimeFn = mock(() => ({
+    const sendTelegramMessage = mock(async (_chatId: bigint, _text: string) => undefined);
+    const createCronRuntimeFn = mock((options) => {
+      cronArgs = options;
+
+      return {
       syncNow: mock(async () => ({
         registered: [],
         skippedDisabled: [],
@@ -115,32 +128,65 @@ describe("createRuntimeDeps cron wiring", () => {
       start,
       stop,
       getRegisteredJobIds: mock(() => []),
-    }));
+      };
+    });
 
-    const deps = createRuntimeDeps(
-      {
-        telegramBotToken: null,
-        openAiApiKey: null,
-        workspaceDir: "/tmp/codex-claw-workspace",
-      },
-      {
-        createSdkRuntimeClientFn: () => ({ runTurn }),
-        createCronRuntimeFn,
-      },
-    );
+    try {
+      mkdirSync(path.join(workspaceDir, "state"), { recursive: true });
+      await Bun.write(
+        path.join(workspaceDir, "state", "session.json"),
+        JSON.stringify({
+          chatId: "123",
+          threadId: "thread_1",
+          isRunning: true,
+          lastStartedAt: "2026-03-10T00:00:00.000Z",
+          lastCompletedAt: null,
+          lastSummary: "running",
+          logFile: null,
+        }),
+      );
 
-    await deps.startCronRuntime();
+      const deps = createRuntimeDeps(
+        {
+          telegramBotToken: null,
+          openAiApiKey: null,
+          workspaceDir,
+        },
+        {
+          createSdkRuntimeClientFn: () => ({ runTurn }),
+          createCronRuntimeFn,
+        },
+        {
+          sendTelegramMessage,
+        },
+      );
 
-    expect(createCronRuntimeFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDir: "/tmp/codex-claw-workspace",
-        codex: { runTurn },
-      }),
-    );
-    expect(start).toHaveBeenCalledTimes(1);
+      await deps.startCronRuntime();
 
-    deps.stopCronRuntime();
+      expect(createCronRuntimeFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceDir,
+          codex: { runTurn },
+          resolveCronTargetChatId: expect.any(Function),
+          isInteractiveRunActive: expect.any(Function),
+          deliverCronResult: expect.any(Function),
+          logCronExecution: expect.any(Function),
+        }),
+      );
 
-    expect(stop).toHaveBeenCalledTimes(1);
+      await expect(cronArgs?.resolveCronTargetChatId()).resolves.toBe(123n);
+      await expect(cronArgs?.isInteractiveRunActive()).resolves.toBe(true);
+
+      await cronArgs?.deliverCronResult(123n, "cron result");
+      expect(sendTelegramMessage).toHaveBeenCalledWith(123n, "cron result");
+
+      expect(start).toHaveBeenCalledTimes(1);
+
+      deps.stopCronRuntime();
+
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
   });
 });

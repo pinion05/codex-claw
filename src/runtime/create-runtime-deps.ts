@@ -15,11 +15,32 @@ export type RuntimeDeps = CreateBotHandlersDeps & {
   stopCronRuntime: () => void;
 };
 
+type SendTelegramMessage = (chatId: bigint, text: string) => Promise<void>;
+
+type CronExecutionEvent = {
+  jobId: string;
+  phase: "execution" | "delivery" | "skip";
+  status: "completed" | "failed" | "skipped";
+  chatId?: bigint | null;
+  threadId?: string | null;
+  error?: string | null;
+};
+
+type CronRuntimeWiringArgs = Parameters<typeof createCronRuntime>[0] & {
+  resolveCronTargetChatId: () => Promise<bigint | null>;
+  isInteractiveRunActive: () => Promise<boolean>;
+  deliverCronResult: SendTelegramMessage;
+  logCronExecution: (event: CronExecutionEvent) => Promise<void> | void;
+};
+
 export function createRuntimeDeps(
   config: AppConfig,
   overrides: {
     createSdkRuntimeClientFn?: typeof createSdkRuntimeClient;
     createCronRuntimeFn?: typeof createCronRuntime;
+  } = {},
+  integrations: {
+    sendTelegramMessage?: SendTelegramMessage;
   } = {},
 ): RuntimeDeps {
   const store = new FileSessionStore(config.workspaceDir);
@@ -33,11 +54,26 @@ export function createRuntimeDeps(
     codex,
     logger,
   });
-  const cronRuntime = (overrides.createCronRuntimeFn ?? createCronRuntime)({
+  const cronRuntimeArgs: CronRuntimeWiringArgs = {
     codexClawHomeDir: resolveCodexClawHomeDir(),
     workspaceDir: config.workspaceDir,
     codex,
-  });
+    resolveCronTargetChatId: async () => {
+      const session = await store.readCurrentSession();
+
+      if (!session) {
+        return null;
+      }
+
+      return BigInt(session.chatId);
+    },
+    isInteractiveRunActive: async () => (await store.readCurrentSession())?.isRunning ?? false,
+    deliverCronResult: async (chatId, text) => {
+      await integrations.sendTelegramMessage?.(chatId, text);
+    },
+    logCronExecution: async (_event) => undefined,
+  };
+  const cronRuntime = (overrides.createCronRuntimeFn ?? createCronRuntime)(cronRuntimeArgs);
   let cronStarted = false;
 
   const startCronRuntime = async () => {
