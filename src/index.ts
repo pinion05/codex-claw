@@ -17,8 +17,16 @@ export async function main(): Promise<void> {
 
   await ensureWorkspaceDirectories(config.workspaceDir);
 
-  const handlers = createRuntimeDeps(config);
   const bot = new Bot(telegramToken.token);
+  const handlers = createRuntimeDeps(
+    config,
+    {},
+    {
+      sendTelegramMessage: async (chatId, text) => {
+        await bot.api.sendMessage(chatId.toString(), text);
+      },
+    },
+  );
 
   bot.catch((error) => {
     console.error(`[codex-claw] update ${error.ctx.update.update_id} failed`, error.error);

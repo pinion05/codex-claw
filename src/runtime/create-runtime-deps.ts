@@ -15,11 +15,33 @@ export type RuntimeDeps = CreateBotHandlersDeps & {
   stopCronRuntime: () => void;
 };
 
+type SendTelegramMessage = (chatId: bigint, text: string) => Promise<void>;
+
+type CronExecutionEvent = {
+  jobId: string;
+  phase: "execution" | "delivery" | "skip";
+  status: "completed" | "failed" | "skipped";
+  reason?: string;
+  chatId?: bigint | null;
+  threadId?: string | null;
+  error?: string | null;
+};
+
+type CronRuntimeWiringArgs = Parameters<typeof createCronRuntime>[0] & {
+  resolveCronTargetChatId: () => Promise<bigint | null>;
+  isInteractiveRunActive: () => Promise<boolean>;
+  deliverCronResult?: SendTelegramMessage;
+  logCronExecution: (event: CronExecutionEvent) => Promise<void> | void;
+};
+
 export function createRuntimeDeps(
   config: AppConfig,
   overrides: {
     createSdkRuntimeClientFn?: typeof createSdkRuntimeClient;
     createCronRuntimeFn?: typeof createCronRuntime;
+  } = {},
+  integrations: {
+    sendTelegramMessage?: SendTelegramMessage;
   } = {},
 ): RuntimeDeps {
   const store = new FileSessionStore(config.workspaceDir);
@@ -33,11 +55,60 @@ export function createRuntimeDeps(
     codex,
     logger,
   });
-  const cronRuntime = (overrides.createCronRuntimeFn ?? createCronRuntime)({
+  const readCronTargetSession = async () => {
+    try {
+      return await store.readCurrentSession();
+    } catch {
+      return null;
+    }
+  };
+  const parseCronTargetChatId = (chatId: string): bigint | null => {
+    try {
+      return BigInt(chatId);
+    } catch {
+      return null;
+    }
+  };
+  const cronRuntimeArgs: CronRuntimeWiringArgs = {
     codexClawHomeDir: resolveCodexClawHomeDir(),
     workspaceDir: config.workspaceDir,
     codex,
-  });
+    resolveCronTargetChatId: async () => {
+      const session = await readCronTargetSession();
+
+      if (!session) {
+        return null;
+      }
+
+      return parseCronTargetChatId(session.chatId);
+    },
+    isInteractiveRunActive: async () => {
+      const session = await readCronTargetSession();
+
+      if (!session) {
+        return false;
+      }
+
+      const chatId = parseCronTargetChatId(session.chatId);
+
+      if (chatId === null) {
+        return false;
+      }
+
+      return (await runtime.getSession(chatId)).isRunning;
+    },
+    logCronExecution: async (event) => {
+      await logger.writeCronLog?.(event);
+    },
+    ...(integrations.sendTelegramMessage
+      ? {
+          deliverCronResult: async (chatId, text) => {
+            await integrations.sendTelegramMessage?.(chatId, text);
+          },
+        }
+      : {}),
+  };
+  const cronRuntime = (overrides.createCronRuntimeFn ?? createCronRuntime)(cronRuntimeArgs);
   let cronStarted = false;
 
   const startCronRuntime = async () => {

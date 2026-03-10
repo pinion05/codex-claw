@@ -31,6 +31,20 @@ export function formatRunCompletedMessage(summary?: string | null): string {
   return detail;
 }
 
+export function formatCronCompletedMessage(summary?: string | null): string {
+  const detail = preserveLineBreaks(summary);
+
+  if (detail.length === 0) {
+    return "Cron run completed.";
+  }
+
+  return detail;
+}
+
+export function formatCronFailedMessage(error: string): string {
+  return formatRunFailedMessage(error);
+}
+
 export function formatRunAbortedMessage(): string {
   return "Run aborted.";
 }

@@ -4,11 +4,27 @@ import { parseScheduledJobDefinition } from "./parser";
 import { createScheduledJobScheduler } from "./scheduler";
 import type { ScheduledJobIssue, ScheduledJobSpec } from "./types";
 import { disableScheduledJobDefinition } from "./workspace";
+import { formatCronCompletedMessage } from "../bot/formatters";
 
 type RefreshReport = {
   registered: string[];
   skippedDisabled: string[];
   errors: ScheduledJobIssue[];
+};
+
+type CronDispatchResult = {
+  summary: string | null;
+  threadId: string | null;
+};
+
+type CronExecutionEvent = {
+  jobId: string;
+  phase: "execution" | "delivery" | "skip";
+  status: "completed" | "failed" | "skipped";
+  reason?: string;
+  chatId?: bigint | null;
+  threadId?: string | null;
+  error?: string | null;
 };
 
 type TimerHandle = ReturnType<typeof setInterval>;
@@ -36,6 +52,10 @@ export function createCronRuntime({
   codexClawHomeDir,
   dispatchPrompt,
   codex,
+  resolveCronTargetChatId,
+  isInteractiveRunActive,
+  deliverCronResult,
+  logCronExecution,
   onBackgroundError,
   scheduler = createScheduledJobScheduler(),
   setIntervalFn = setInterval,
@@ -48,36 +68,138 @@ export function createCronRuntime({
   codex?: {
     runTurn: (request: { threadId: string | null; prompt: string }) => Promise<unknown>;
   };
+  resolveCronTargetChatId?: () => Promise<bigint | null>;
+  isInteractiveRunActive?: () => Promise<boolean>;
+  deliverCronResult?: (chatId: bigint, text: string) => Promise<void>;
+  logCronExecution?: (event: CronExecutionEvent) => Promise<void> | void;
   onBackgroundError?: (error: unknown) => void;
   scheduler?: ReturnType<typeof createScheduledJobScheduler>;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
   intervalMs?: number;
 }) {
-  const dispatch =
-    dispatchPrompt ??
-    (async (prompt: string) => {
-      if (!codex) {
-        throw new Error("createCronRuntime requires either dispatchPrompt or codex");
-      }
-
-      await codex.runTurn({
-        threadId: null,
-        prompt,
-      });
-    });
   const reportBackgroundError =
     onBackgroundError ??
     ((error: unknown) => {
       console.error("[codex-claw] cron background tick failed", error);
     });
+  const dispatchWithCodex = async (prompt: string): Promise<CronDispatchResult> => {
+    if (dispatchPrompt) {
+      await dispatchPrompt(prompt);
+      return {
+        summary: null,
+        threadId: null,
+      };
+    }
+
+    if (!codex) {
+      throw new Error("createCronRuntime requires either dispatchPrompt or codex");
+    }
+
+    const result = await codex.runTurn({
+      threadId: null,
+      prompt,
+    });
+
+    return normalizeCronDispatchResult(result);
+  };
+  const dispatchCronPrompt = async (prompt: string): Promise<CronDispatchResult> => {
+    if (dispatchPrompt) {
+      await dispatchPrompt(prompt);
+      return {
+        summary: null,
+        threadId: null,
+      };
+    }
+
+    if (!codex) {
+      throw new Error("createCronRuntime requires either dispatchPrompt or codex");
+    }
+
+    return dispatchWithCodex(prompt);
+  };
+  const logCronEvent = async (event: CronExecutionEvent) => {
+    try {
+      await logCronExecution?.(event);
+    } catch (error) {
+      reportBackgroundError(error);
+    }
+  };
   const injector = createScheduledJobInjector({
     scheduler,
     createRunner: (spec) => async () => {
-      await dispatch(spec.action.prompt);
+      const targetChatId = resolveCronTargetChatId ? await resolveCronTargetChatId() : undefined;
+
+      if (targetChatId === null) {
+        await logCronEvent({
+          jobId: spec.id,
+          phase: "skip",
+          status: "skipped",
+          reason: "no-target-chat",
+        });
+        return;
+      }
+
+      if ((await isInteractiveRunActive?.()) === true) {
+        await logCronEvent({
+          jobId: spec.id,
+          phase: "skip",
+          status: "skipped",
+          reason: "interactive-run-active",
+          chatId: targetChatId,
+        });
+        return;
+      }
+
+      let result: CronDispatchResult;
+
+      try {
+        result = await dispatchCronPrompt(spec.action.prompt);
+      } catch (error) {
+        await logCronEvent({
+          jobId: spec.id,
+          phase: "execution",
+          status: "failed",
+          chatId: targetChatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+
+      await logCronEvent({
+        jobId: spec.id,
+        phase: "execution",
+        status: "completed",
+        chatId: targetChatId,
+        threadId: result.threadId,
+      });
 
       if (spec.date !== null) {
         await disableScheduledJobDefinition(spec.sourcePath);
+      }
+
+      if (targetChatId === undefined || !deliverCronResult) {
+        return;
+      }
+
+      try {
+        await deliverCronResult(targetChatId, formatCronCompletedMessage(result.summary));
+        await logCronEvent({
+          jobId: spec.id,
+          phase: "delivery",
+          status: "completed",
+          chatId: targetChatId,
+          threadId: result.threadId,
+        });
+      } catch (error) {
+        await logCronEvent({
+          jobId: spec.id,
+          phase: "delivery",
+          status: "failed",
+          chatId: targetChatId,
+          threadId: result.threadId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     },
   });
@@ -176,5 +298,21 @@ export function createCronRuntime({
     start,
     stop,
     getRegisteredJobIds: () => scheduler.listJobIds(),
+  };
+}
+
+function normalizeCronDispatchResult(value: unknown): CronDispatchResult {
+  if (!value || typeof value !== "object") {
+    return {
+      summary: null,
+      threadId: null,
+    };
+  }
+
+  const result = value as Record<string, unknown>;
+
+  return {
+    summary: typeof result.summary === "string" ? result.summary : null,
+    threadId: typeof result.threadId === "string" ? result.threadId : null,
   };
 }

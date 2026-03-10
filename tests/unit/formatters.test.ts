@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  formatCronCompletedMessage,
   formatRunCompletedMessage,
   formatRunFailedMessage,
   formatRunStartedMessage,
@@ -36,6 +37,10 @@ describe("run lifecycle formatters", () => {
 
   test("shows NULL when the completion summary is empty", () => {
     expect(formatRunCompletedMessage(null)).toBe("NULL");
+  });
+
+  test("shows a friendly fallback when the cron completion summary is empty", () => {
+    expect(formatCronCompletedMessage(null)).toBe("Cron run completed.");
   });
 
   test("preserves multiline errors in failure text", () => {

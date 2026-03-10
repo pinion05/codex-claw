@@ -18,6 +18,10 @@ describe("README", () => {
     expect(readme).toContain("/help");
     expect(readme).toContain("~/.codex-claw/workspace");
     expect(readme).toContain("fixed workspace");
+    expect(readme).toContain("persisted Telegram chat");
+    expect(readme).toContain("delivery failure does not mean");
+    expect(readme).toContain("If there is no persisted target chat yet, the cron job will skip instead of sending a notification.");
+    expect(readme).toContain("If an interactive run is currently active, the cron job will skip that scheduled minute instead of competing with the live turn.");
     expect(readme).toContain("## Publishing");
     expect(readme).toContain("bun run check");
     expect(readme).toContain("bun run publish:dry-run");

@@ -109,6 +109,10 @@ Notes:
 - If `date` is present, the job runs once on that local date and time.
 - `action.type` is currently fixed to `"message"`.
 - Scheduled jobs run in fresh Codex threads, separate from the active Telegram chat thread.
+- Cron results may still notify the persisted Telegram chat even though the Codex execution happens in a fresh thread.
+- A delivery failure does not mean the scheduled prompt did not run; execution and delivery are tracked separately.
+- If there is no persisted target chat yet, the cron job will skip instead of sending a notification.
+- If an interactive run is currently active, the cron job will skip that scheduled minute instead of competing with the live turn.
 
 ## Commands
 
@@ -130,7 +134,7 @@ Notes:
 This workspace is the bot's operational home and contains things like:
 
 - `state/session.json` for the persistent chat session metadata
-- `logs/YYYY/MM/DD/*.json` for structured run logs
+- `logs/YYYY/MM/DD/*.json` for structured run logs and cron execution/delivery/skip logs
 
 The fixed operational workspace stores local state and logs under predictable paths, but the agent is not restricted to that directory for user-requested work. When Codex decides it needs to inspect or modify files outside that workspace, it may still read and write outside that workspace.
 
