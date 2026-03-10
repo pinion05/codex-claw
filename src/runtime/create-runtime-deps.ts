@@ -68,7 +68,15 @@ export function createRuntimeDeps(
 
       return BigInt(session.chatId);
     },
-    isInteractiveRunActive: async () => (await store.readCurrentSession())?.isRunning ?? false,
+    isInteractiveRunActive: async () => {
+      const session = await store.readCurrentSession();
+
+      if (!session) {
+        return false;
+      }
+
+      return (await runtime.getSession(BigInt(session.chatId))).isRunning;
+    },
     deliverCronResult: async (chatId, text) => {
       await integrations.sendTelegramMessage?.(chatId, text);
     },

@@ -78,6 +78,11 @@ export function createCronRuntime({
   clearIntervalFn?: typeof clearInterval;
   intervalMs?: number;
 }) {
+  const reportBackgroundError =
+    onBackgroundError ??
+    ((error: unknown) => {
+      console.error("[codex-claw] cron background tick failed", error);
+    });
   const dispatchWithCodex = async (prompt: string): Promise<CronDispatchResult> => {
     if (dispatchPrompt) {
       await dispatchPrompt(prompt);
@@ -114,13 +119,12 @@ export function createCronRuntime({
     return dispatchWithCodex(prompt);
   };
   const logCronEvent = async (event: CronExecutionEvent) => {
-    await logCronExecution?.(event);
+    try {
+      await logCronExecution?.(event);
+    } catch (error) {
+      reportBackgroundError(error);
+    }
   };
-  const reportBackgroundError =
-    onBackgroundError ??
-    ((error: unknown) => {
-      console.error("[codex-claw] cron background tick failed", error);
-    });
   const injector = createScheduledJobInjector({
     scheduler,
     createRunner: (spec) => async () => {

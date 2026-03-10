@@ -174,4 +174,64 @@ describe("createCronRuntime one-shot flow", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  test("keeps a one-shot disabled when execution logging fails after codex success", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-system-"));
+    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const sourcePath = path.join(cronjobsDir, "launch-reminder.json");
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: [],
+    }));
+    const onBackgroundError = mock((_error: unknown) => undefined);
+    const logCronExecution = mock(async (event: { phase: string; status: string }) => {
+      if (event.phase === "execution" && event.status === "completed") {
+        throw new Error("execution log failed");
+      }
+    });
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        sourcePath,
+        JSON.stringify({
+          id: "launch-reminder",
+          date: "2027-07-12",
+          time: "16:00",
+          action: {
+            type: "message",
+            prompt: "Prepare the launch day checklist.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: { runTurn },
+        resolveCronTargetChatId: async () => 123n,
+        isInteractiveRunActive: async () => false,
+        logCronExecution,
+        onBackgroundError,
+      });
+
+      await expect(runtime.tick(new Date(2027, 6, 12, 16, 0, 0))).resolves.toEqual({
+        registered: ["launch-reminder"],
+        skippedDisabled: [],
+        errors: [],
+      });
+      await expect(runtime.tick(new Date(2027, 6, 12, 16, 0, 30))).resolves.toEqual({
+        registered: [],
+        skippedDisabled: ["launch-reminder"],
+        errors: [],
+      });
+
+      expect(runTurn).toHaveBeenCalledTimes(1);
+      expect(onBackgroundError).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(readFileSync(sourcePath, "utf8")).disabled).toBe(true);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });

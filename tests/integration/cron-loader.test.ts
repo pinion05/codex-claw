@@ -175,7 +175,7 @@ describe("createRuntimeDeps cron wiring", () => {
       );
 
       await expect(cronArgs?.resolveCronTargetChatId()).resolves.toBe(123n);
-      await expect(cronArgs?.isInteractiveRunActive()).resolves.toBe(true);
+      await expect(cronArgs?.isInteractiveRunActive()).resolves.toBe(false);
 
       await cronArgs?.deliverCronResult(123n, "cron result");
       expect(sendTelegramMessage).toHaveBeenCalledWith(123n, "cron result");
@@ -212,6 +212,89 @@ describe("createRuntimeDeps cron wiring", () => {
       deps.stopCronRuntime();
 
       expect(stop).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("recovers stale persisted running state before gating cron delivery", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-"));
+    let cronArgs:
+      | {
+          isInteractiveRunActive: () => Promise<boolean>;
+        }
+      | undefined;
+    const createCronRuntimeFn = mock((options) => {
+      cronArgs = options;
+
+      return {
+        syncNow: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        refresh: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        tick: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        start: mock(async () => ({
+          registered: [],
+          skippedDisabled: [],
+          errors: [],
+        })),
+        stop: mock(() => undefined),
+        getRegisteredJobIds: mock(() => []),
+      };
+    });
+
+    try {
+      mkdirSync(path.join(workspaceDir, "state"), { recursive: true });
+      await Bun.write(
+        path.join(workspaceDir, "state", "session.json"),
+        JSON.stringify({
+          chatId: "123",
+          threadId: "thread_1",
+          isRunning: true,
+          lastStartedAt: "2026-03-10T00:00:00.000Z",
+          lastCompletedAt: null,
+          lastSummary: "running",
+          logFile: null,
+        }),
+      );
+
+      const deps = createRuntimeDeps(
+        {
+          telegramBotToken: null,
+          openAiApiKey: null,
+          workspaceDir,
+        },
+        {
+          createSdkRuntimeClientFn: () => ({
+            runTurn: mock(async () => ({
+              threadId: "thread_1",
+              summary: "done",
+              touchedPaths: [],
+            })),
+          }),
+          createCronRuntimeFn,
+        },
+      );
+
+      await deps.startCronRuntime();
+
+      await expect(cronArgs?.isInteractiveRunActive()).resolves.toBe(false);
+
+      const persistedSession = JSON.parse(
+        readFileSync(path.join(workspaceDir, "state", "session.json"), "utf8"),
+      ) as Record<string, unknown>;
+
+      expect(persistedSession.isRunning).toBe(false);
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });
     }
