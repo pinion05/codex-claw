@@ -4,10 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import { createCronRuntime } from "../../src/cron/runtime";
 
+function createTempCodexClawHome(prefix: string) {
+  const root = mkdtempSync(path.join(os.tmpdir(), prefix));
+
+  return {
+    root,
+    codexClawHomeDir: path.join(root, ".codex-claw"),
+  };
+}
+
 describe("createCronRuntime dispatch", () => {
   test("dispatches matching jobs through the provided prompt runner", async () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-runtime-"));
-    const codexClawHomeDir = path.join(root, ".codex-claw");
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
     const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
     const dispatchPrompt = mock(async (_prompt: string) => undefined);
 
@@ -40,6 +48,7 @@ describe("createCronRuntime dispatch", () => {
   });
 
   test("routes background tick failures into the configured error sink", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
     let intervalCallback: (() => void) | undefined;
     let tickCount = 0;
     const onBackgroundError = mock((_error: unknown) => undefined);
@@ -64,26 +73,32 @@ describe("createCronRuntime dispatch", () => {
       },
     };
 
-    const runtime = createCronRuntime({
-      scheduler,
-      dispatchPrompt: async () => undefined,
-      setIntervalFn: ((callback: () => void) => {
-        intervalCallback = callback;
-        return 1 as unknown as ReturnType<typeof setInterval>;
-      }) as typeof setInterval,
-      clearIntervalFn: (() => undefined) as typeof clearInterval,
-      onBackgroundError,
-    });
+    try {
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        scheduler,
+        dispatchPrompt: async () => undefined,
+        setIntervalFn: ((callback: () => void) => {
+          intervalCallback = callback;
+          return 1 as unknown as ReturnType<typeof setInterval>;
+        }) as typeof setInterval,
+        clearIntervalFn: (() => undefined) as typeof clearInterval,
+        onBackgroundError,
+      });
 
-    await runtime.start();
-    intervalCallback?.();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.start();
+      intervalCallback?.();
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(onBackgroundError).toHaveBeenCalledTimes(1);
-    expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+      expect(onBackgroundError).toHaveBeenCalledTimes(1);
+      expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   test("does not fail startup when the initial scheduler tick fails", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
     let intervalCallback: (() => void) | undefined;
     const onBackgroundError = mock((_error: unknown) => undefined);
     const scheduler = {
@@ -101,29 +116,34 @@ describe("createCronRuntime dispatch", () => {
       },
     };
 
-    const runtime = createCronRuntime({
-      scheduler,
-      dispatchPrompt: async () => undefined,
-      setIntervalFn: ((callback: () => void) => {
-        intervalCallback = callback;
-        return 1 as unknown as ReturnType<typeof setInterval>;
-      }) as typeof setInterval,
-      clearIntervalFn: (() => undefined) as typeof clearInterval,
-      onBackgroundError,
-    });
+    try {
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        scheduler,
+        dispatchPrompt: async () => undefined,
+        setIntervalFn: ((callback: () => void) => {
+          intervalCallback = callback;
+          return 1 as unknown as ReturnType<typeof setInterval>;
+        }) as typeof setInterval,
+        clearIntervalFn: (() => undefined) as typeof clearInterval,
+        onBackgroundError,
+      });
 
-    await expect(runtime.start()).resolves.toEqual({
-      registered: [],
-      skippedDisabled: [],
-      errors: [],
-    });
-    expect(intervalCallback).toBeDefined();
-    expect(onBackgroundError).toHaveBeenCalledTimes(1);
-    expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+      await expect(runtime.start()).resolves.toEqual({
+        registered: [],
+        skippedDisabled: [],
+        errors: [],
+      });
+      expect(intervalCallback).toBeDefined();
+      expect(onBackgroundError).toHaveBeenCalledTimes(1);
+      expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   test("does not fail startup when the initial refresh fails", async () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-cron-runtime-"));
+    const { root } = createTempCodexClawHome("codex-claw-cron-runtime-");
     const blockingFile = path.join(root, "not-a-directory");
     let intervalCallback: (() => void) | undefined;
     const onBackgroundError = mock((_error: unknown) => undefined);
