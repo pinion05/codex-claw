@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { formatCronCompletedMessage } from "../../src/bot/formatters";
 import { createCronRuntime } from "../../src/cron/runtime";
 
 function createTempCodexClawHome(prefix: string) {
@@ -170,6 +171,148 @@ describe("createCronRuntime dispatch", () => {
       expect(intervalCallback).toBeDefined();
       expect(onBackgroundError).toHaveBeenCalledTimes(1);
       expect(onBackgroundError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  test("skips execution and logs when no target chat is available", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: [],
+    }));
+    const deliverCronResult = mock(async (_chatId: bigint, _text: string) => undefined);
+    const logCronExecution = mock(async (_event: unknown) => undefined);
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time: "09:00",
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: { runTurn },
+        resolveCronTargetChatId: async () => null,
+        isInteractiveRunActive: async () => false,
+        deliverCronResult,
+        logCronExecution,
+      });
+
+      await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
+
+      expect(runTurn).not.toHaveBeenCalled();
+      expect(deliverCronResult).not.toHaveBeenCalled();
+      expect(logCronExecution).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobId: "daily-summary",
+          phase: "skip",
+          status: "skipped",
+          reason: "no-target-chat",
+        }),
+      );
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  test("skips execution and logs when an interactive run is active", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: [],
+    }));
+    const deliverCronResult = mock(async (_chatId: bigint, _text: string) => undefined);
+    const logCronExecution = mock(async (_event: unknown) => undefined);
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time: "09:00",
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: { runTurn },
+        resolveCronTargetChatId: async () => 123n,
+        isInteractiveRunActive: async () => true,
+        deliverCronResult,
+        logCronExecution,
+      });
+
+      await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
+
+      expect(runTurn).not.toHaveBeenCalled();
+      expect(deliverCronResult).not.toHaveBeenCalled();
+      expect(logCronExecution).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobId: "daily-summary",
+          phase: "skip",
+          status: "skipped",
+          reason: "interactive-run-active",
+        }),
+      );
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  test("delivers the formatted summary after a successful cron run", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: [],
+    }));
+    const deliverCronResult = mock(async (_chatId: bigint, _text: string) => undefined);
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time: "09:00",
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: { runTurn },
+        resolveCronTargetChatId: async () => 123n,
+        isInteractiveRunActive: async () => false,
+        deliverCronResult,
+      });
+
+      await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
+
+      expect(deliverCronResult).toHaveBeenCalledWith(123n, formatCronCompletedMessage("done"));
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

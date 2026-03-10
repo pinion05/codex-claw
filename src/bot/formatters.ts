@@ -31,6 +31,14 @@ export function formatRunCompletedMessage(summary?: string | null): string {
   return detail;
 }
 
+export function formatCronCompletedMessage(summary?: string | null): string {
+  return formatRunCompletedMessage(summary);
+}
+
+export function formatCronFailedMessage(error: string): string {
+  return formatRunFailedMessage(error);
+}
+
 export function formatRunAbortedMessage(): string {
   return "Run aborted.";
 }
