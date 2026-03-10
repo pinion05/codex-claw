@@ -1,4 +1,5 @@
-<img width="1024" height="558" alt="image" src="https://github.com/user-attachments/assets/5ce8ea56-df75-46e1-a1d8-791ea867ef52" />
+<img width="2816" height="1536" alt="Gemini_Generated_Image_6gckpq6gckpq6gck" src="https://github.com/user-attachments/assets/e3e17fef-85a1-496a-9db5-3a25f0851672" />
+
 
 # codex-claw
 
