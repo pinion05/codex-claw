@@ -76,6 +76,38 @@ Example:
 2. `그럼 다음으로 테스트부터 돌려봐`
 3. `방금 수정한 내용 요약해줘`
 
+## Telegram Attachments
+
+`codex-claw` treats one Telegram attachment message as one Codex turn.
+
+- Supported attachment types: `document`, `photo`
+- `document` messages save the uploaded file locally before the turn runs
+- `photo` messages save only the largest Telegram photo variant
+- `photo` messages that share the same Telegram `media_group_id` are coalesced into one Codex turn
+- The attachment caption becomes the primary user request for Codex
+- Attachment paths and metadata are appended as structured context
+- Later plain-text follow-up messages do not automatically re-inject earlier attachment bundles
+
+Saved attachment bundles live under:
+
+```text
+~/.codex-claw/workspace/inbox/<chatId>/<messageId>/
+```
+
+Each bundle directory keeps the downloaded files plus:
+
+```text
+bundle.json
+```
+
+`bundle.json` records the Telegram `chatId`, `messageId`, caption, successful `attachments`, and `failedAttachments`.
+
+Notes:
+
+- If some attachments fail to download, successful files are still saved and the failure metadata is included in the Codex prompt
+- If all attachments fail but the caption exists, Codex still receives the caption plus failure metadata
+- Bundles are kept until later cleanup work; there is no automatic deletion yet
+
 ## Scheduled Jobs
 
 `codex-claw` can run scheduled Codex prompts from JSON definitions stored under:

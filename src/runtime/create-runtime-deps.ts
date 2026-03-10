@@ -1,4 +1,11 @@
 import type { CreateBotHandlersDeps } from "../bot/create-bot";
+import type { TelegramMessageBundle } from "../files/telegram-message-bundle";
+import {
+  composeTelegramMessageBundlePrompt,
+  sanitizeTelegramAttachmentName,
+  saveTelegramMessageBundle,
+  writeTelegramMessageBundleJson,
+} from "../files/telegram-message-bundle";
 import { formatStatusMessage } from "../bot/formatters";
 import type { AppConfig } from "../config";
 import { createCronRuntime } from "../cron/runtime";
@@ -128,11 +135,44 @@ export function createRuntimeDeps(
     cronRuntime.stop();
     cronStarted = false;
   };
+  const prepareAttachmentPrompt: NonNullable<CreateBotHandlersDeps["prepareAttachmentPrompt"]> =
+    async (input) => {
+      const savedBundle = await saveTelegramMessageBundle({
+        workspaceDir: config.workspaceDir,
+        chatId: input.chatId,
+        messageId: input.messageId,
+        caption: input.caption,
+        attachments: input.attachments,
+      });
+      const failedAttachments = [
+        ...savedBundle.bundle.failedAttachments,
+        ...input.failedAttachments.map((attachment) => ({
+          ...attachment,
+          name: sanitizeTelegramAttachmentName(attachment.name, "attachment"),
+        })),
+      ];
+      const mergedBundle: TelegramMessageBundle =
+        failedAttachments.length === savedBundle.bundle.failedAttachments.length
+          ? savedBundle.bundle
+          : {
+              ...savedBundle.bundle,
+              failedAttachments,
+            };
+
+      if (mergedBundle !== savedBundle.bundle) {
+        await writeTelegramMessageBundleJson(savedBundle.bundleJsonPath, mergedBundle);
+      }
+
+      return {
+        prompt: composeTelegramMessageBundlePrompt(mergedBundle),
+      };
+    };
 
   return {
     getStatusMessage: async (chatId) => formatStatusMessage(await runtime.getSession(chatId)),
     resetSession: async (chatId) => runtime.resetSession(chatId),
     abortRun: async (chatId) => runtime.abortRun(chatId),
+    prepareAttachmentPrompt,
     runTurn: async (chatId, prompt) => runtime.runTurn(chatId, prompt),
     startBackgroundServices: startCronRuntime,
     stopBackgroundServices: stopCronRuntime,

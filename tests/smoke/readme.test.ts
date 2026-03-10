@@ -12,6 +12,15 @@ describe("README", () => {
     expect(readme).toContain("입력하세요");
     expect(readme).toContain("codex-claw-agentty");
     expect(readme).toContain("npx -y agentty-cli");
+    expect(readme).toContain("## Telegram Attachments");
+    expect(readme).toContain("Supported attachment types: `document`, `photo`");
+    expect(readme).toContain("one Telegram attachment message as one Codex turn");
+    expect(readme).toContain("~/.codex-claw/workspace/inbox/<chatId>/<messageId>/");
+    expect(readme).toContain("bundle.json");
+    expect(readme).toContain("largest Telegram photo variant");
+    expect(readme).toContain("media_group_id");
+    expect(readme).toContain("failedAttachments");
+    expect(readme).toContain("there is no automatic deletion yet");
     expect(readme).toContain("/status");
     expect(readme).toContain("/reset");
     expect(readme).toContain("/abort");

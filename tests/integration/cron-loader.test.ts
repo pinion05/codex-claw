@@ -84,6 +84,89 @@ describe("createCronRuntime loading", () => {
 });
 
 describe("createRuntimeDeps cron wiring", () => {
+  test("persists merged failed attachment metadata back into bundle.json", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-"));
+
+    try {
+      const deps = createRuntimeDeps(
+        {
+          telegramBotToken: null,
+          openAiApiKey: null,
+          workspaceDir,
+        },
+        {
+          createSdkRuntimeClientFn: () => ({
+            runTurn: mock(async () => ({
+              threadId: "thread_1",
+              summary: "done",
+              touchedPaths: [],
+            })),
+          }),
+          createCronRuntimeFn: () => ({
+            syncNow: mock(async () => ({
+              registered: [],
+              skippedDisabled: [],
+              errors: [],
+            })),
+            refresh: mock(async () => ({
+              registered: [],
+              skippedDisabled: [],
+              errors: [],
+            })),
+            tick: mock(async () => ({
+              registered: [],
+              skippedDisabled: [],
+              errors: [],
+            })),
+            start: mock(async () => ({
+              registered: [],
+              skippedDisabled: [],
+              errors: [],
+            })),
+            stop: mock(() => undefined),
+            getRegisteredJobIds: mock(() => []),
+          }),
+        },
+      );
+
+      const prepared = await deps.prepareAttachmentPrompt?.({
+        chatId: 321,
+        messageId: 654,
+        caption: "review this upload",
+        attachments: [
+          {
+            kind: "document",
+            name: "report.txt",
+            bytes: new TextEncoder().encode("document body"),
+          },
+        ],
+        failedAttachments: [
+          {
+            name: "remote\nbroken.txt",
+            reason: "download failed",
+          },
+        ],
+      });
+
+      expect(prepared?.prompt).toContain("remote broken.txt - download failed");
+
+      const bundle = JSON.parse(
+        readFileSync(path.join(workspaceDir, "inbox", "321", "654", "bundle.json"), "utf8"),
+      ) as {
+        failedAttachments: { name: string; reason: string }[];
+      };
+
+      expect(bundle.failedAttachments).toEqual([
+        {
+          name: "remote broken.txt",
+          reason: "download failed",
+        },
+      ]);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
   test("runs a real cron runtime through createRuntimeDeps with an isolated codex home", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-deps-e2e-"));
     const workspaceDir = path.join(root, "workspace");

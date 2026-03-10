@@ -181,6 +181,7 @@ describe("ensureWorkspaceDirectories", () => {
       expect(statSync(path.join(workspaceDir, "workspace")).isDirectory()).toBe(true);
       expect(statSync(path.join(workspaceDir, "workspace", "state")).isDirectory()).toBe(true);
       expect(statSync(path.join(workspaceDir, "workspace", "logs")).isDirectory()).toBe(true);
+      expect(statSync(path.join(workspaceDir, "workspace", "inbox")).isDirectory()).toBe(true);
       expect(installCronjobCreatorSkill).toHaveBeenCalledTimes(1);
       expect(installAgenttySkill).toHaveBeenCalledTimes(1);
     } finally {
