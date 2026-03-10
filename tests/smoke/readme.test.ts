@@ -16,6 +16,9 @@ describe("README", () => {
     expect(readme).toContain("/help");
     expect(readme).toContain("~/.codex-claw/workspace");
     expect(readme).toContain("fixed workspace");
+    expect(readme).toContain("persisted Telegram chat");
+    expect(readme).toContain("delivery failure does not mean");
+    expect(readme).toContain("skip");
     expect(readme).toContain("## Publishing");
     expect(readme).toContain("bun run check");
     expect(readme).toContain("bun run publish:dry-run");

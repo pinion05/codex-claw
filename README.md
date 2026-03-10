@@ -106,6 +106,9 @@ Notes:
 - If `date` is present, the job runs once on that local date and time.
 - `action.type` is currently fixed to `"message"`.
 - Scheduled jobs run in fresh Codex threads, separate from the active Telegram chat thread.
+- Cron results may still notify the persisted Telegram chat even though the Codex execution happens in a fresh thread.
+- A delivery failure does not mean the scheduled prompt did not run; execution and delivery are tracked separately.
+- If there is no persisted target chat yet, the cron job will skip instead of sending a notification.
 
 ## Commands
 

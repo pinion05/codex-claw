@@ -1,9 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { formatCronCompletedMessage } from "../../src/bot/formatters";
 import { createCronRuntime } from "../../src/cron/runtime";
+import { createRunLogger } from "../../src/runtime/logging";
 
 function createTempCodexClawHome(prefix: string) {
   const root = mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -12,6 +13,23 @@ function createTempCodexClawHome(prefix: string) {
     root,
     codexClawHomeDir: path.join(root, ".codex-claw"),
   };
+}
+
+function listLogFiles(workspaceDir: string) {
+  const logsRoot = path.join(workspaceDir, "logs");
+  const paths: string[] = [];
+
+  for (const year of readdirSync(logsRoot)) {
+    for (const month of readdirSync(path.join(logsRoot, year))) {
+      for (const day of readdirSync(path.join(logsRoot, year, month))) {
+        for (const file of readdirSync(path.join(logsRoot, year, month, day))) {
+          paths.push(path.join(logsRoot, year, month, day, file));
+        }
+      }
+    }
+  }
+
+  return paths.sort();
 }
 
 describe("createCronRuntime dispatch", () => {
@@ -313,6 +331,126 @@ describe("createCronRuntime dispatch", () => {
       await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
 
       expect(deliverCronResult).toHaveBeenCalledWith(123n, formatCronCompletedMessage("done"));
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  test("writes structured cron logs for execution and delivery phases", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const logger = createRunLogger(root);
+    const runTurn = mock(async () => ({
+      threadId: "thread_1",
+      summary: "done",
+      touchedPaths: [],
+    }));
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time: "09:00",
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: { runTurn },
+        resolveCronTargetChatId: async () => 123n,
+        isInteractiveRunActive: async () => false,
+        deliverCronResult: async () => undefined,
+        logCronExecution: logger.writeCronLog,
+      });
+
+      await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
+
+      const logFiles = listLogFiles(root);
+      expect(logFiles).toHaveLength(2);
+
+      const entries = logFiles.map((filePath) => JSON.parse(readFileSync(filePath, "utf8")) as Record<string, unknown>);
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            jobId: "daily-summary",
+            phase: "execution",
+            status: "completed",
+            chatId: "123",
+            threadId: "thread_1",
+            error: null,
+          }),
+          expect.objectContaining({
+            jobId: "daily-summary",
+            phase: "delivery",
+            status: "completed",
+            chatId: "123",
+            threadId: "thread_1",
+            error: null,
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  test("writes structured cron skip logs", async () => {
+    const { root, codexClawHomeDir } = createTempCodexClawHome("codex-claw-cron-runtime-");
+    const cronjobsDir = path.join(codexClawHomeDir, "cronjobs");
+    const logger = createRunLogger(root);
+
+    try {
+      mkdirSync(cronjobsDir, { recursive: true });
+      await Bun.write(
+        path.join(cronjobsDir, "daily-summary.json"),
+        JSON.stringify({
+          id: "daily-summary",
+          time: "09:00",
+          action: {
+            type: "message",
+            prompt: "Summarize the latest workspace changes.",
+          },
+        }),
+      );
+
+      const runtime = createCronRuntime({
+        codexClawHomeDir,
+        codex: {
+          runTurn: async () => ({
+            threadId: "thread_1",
+            summary: "done",
+            touchedPaths: [],
+          }),
+        },
+        resolveCronTargetChatId: async () => null,
+        isInteractiveRunActive: async () => false,
+        deliverCronResult: async () => undefined,
+        logCronExecution: logger.writeCronLog,
+      });
+
+      await runtime.tick(new Date(2026, 2, 10, 9, 0, 0));
+
+      const logFiles = listLogFiles(root);
+      expect(logFiles).toHaveLength(1);
+
+      const entry = JSON.parse(readFileSync(logFiles[0]!, "utf8")) as Record<string, unknown>;
+
+      expect(entry).toMatchObject({
+        jobId: "daily-summary",
+        phase: "skip",
+        status: "skipped",
+        reason: "no-target-chat",
+        chatId: null,
+        threadId: null,
+        error: null,
+      });
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
