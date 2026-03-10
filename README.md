@@ -1,3 +1,5 @@
+<img width="1024" height="558" alt="image" src="https://github.com/user-attachments/assets/5ce8ea56-df75-46e1-a1d8-791ea867ef52" />
+
 # codex-claw
 
 `codex-claw` is a Bun + TypeScript Telegram-native generalized agent harness that is intended to combine grammY, the Codex SDK, and OpenAI-backed tooling in a small bot-friendly repository.
