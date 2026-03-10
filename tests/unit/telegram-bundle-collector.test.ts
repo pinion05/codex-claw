@@ -52,6 +52,17 @@ function createPhoto(fileId: string): AttachmentDescriptor {
   };
 }
 
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe("TelegramBundleCollector", () => {
   test("non-group updates finalize immediately", async () => {
     const scheduler = new FakeScheduler();
@@ -223,6 +234,50 @@ describe("TelegramBundleCollector", () => {
     ]);
   });
 
+  test("late arrivals stay ignored while finalization is still in flight", async () => {
+    const scheduler = new FakeScheduler();
+    const finalize = createDeferred<void>();
+    const collector = new TelegramBundleCollector<AttachmentDescriptor>({
+      quietPeriodMs: 250,
+      scheduler,
+      tombstoneTtlMs: 10,
+      onFinalize: async () => {
+        await finalize.promise;
+      },
+    });
+
+    await collector.collect({
+      chatId: 100,
+      messageId: 200,
+      mediaGroupId: "album-1",
+      attachments: [createPhoto("photo-1")],
+    });
+
+    const finalizing = scheduler.runNext();
+    await Promise.resolve();
+
+    expect(collector.getState(100, "album-1")).toBe("finalizing");
+    expect(scheduler.size).toBe(0);
+
+    const lateArrival = await collector.collect({
+      chatId: 100,
+      messageId: 201,
+      mediaGroupId: "album-1",
+      attachments: [createPhoto("photo-2")],
+    });
+
+    expect(lateArrival).toMatchObject({
+      kind: "ignored",
+      reason: "finalizing",
+    });
+
+    finalize.resolve();
+    await finalizing;
+
+    expect(collector.getState(100, "album-1")).toBe("completed");
+    expect(scheduler.size).toBe(1);
+  });
+
   test("completed entries keep a tombstone until cleanup and then allow reuse", async () => {
     const scheduler = new FakeScheduler();
     const collector = new TelegramBundleCollector<AttachmentDescriptor>({
@@ -269,7 +324,7 @@ describe("TelegramBundleCollector", () => {
     expect(reusedKey.bundle.attachments).toEqual([createPhoto("photo-3")]);
   });
 
-  test("processing failures still keep a completed tombstone until cleanup and then allow reuse", async () => {
+  test("processing failures keep a failed tombstone until cleanup and then allow reuse", async () => {
     const scheduler = new FakeScheduler();
     const collector = new TelegramBundleCollector<AttachmentDescriptor>({
       quietPeriodMs: 250,
@@ -288,7 +343,7 @@ describe("TelegramBundleCollector", () => {
 
     await scheduler.runNext();
 
-    expect(collector.getState(100, "album-failed")).toBe("completed");
+    expect(collector.getState(100, "album-failed")).toBe("failed");
     expect(scheduler.size).toBe(1);
 
     const lateArrival = await collector.collect({
@@ -300,7 +355,7 @@ describe("TelegramBundleCollector", () => {
 
     expect(lateArrival).toMatchObject({
       kind: "ignored",
-      reason: "completed",
+      reason: "failed",
     });
 
     await scheduler.runNext();

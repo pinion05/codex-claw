@@ -269,6 +269,10 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
           immediateAttachmentContext = null;
         }
       } catch (error) {
+        if (error instanceof AttachmentPreparationError) {
+          return;
+        }
+
         await ctx.reply(formatRunFailedMessage(getErrorMessage(error)));
       }
     });
@@ -301,6 +305,10 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
           immediateAttachmentContext = null;
         }
       } catch (error) {
+        if (error instanceof AttachmentPreparationError) {
+          return;
+        }
+
         await ctx.reply(formatRunFailedMessage(getErrorMessage(error)));
       }
     });
@@ -343,9 +351,12 @@ function createPromptContext(ctx: Context): Omit<BotPromptInput, "prompt"> {
 function createTimeoutScheduler(): TelegramBundleCollectorScheduler {
   return {
     schedule(callback, delayMs) {
-      return setTimeout(() => {
+      const handle = setTimeout(() => {
         Promise.resolve(callback()).catch(() => undefined);
       }, delayMs);
+
+      handle.unref?.();
+      return handle;
     },
     cancel(handle) {
       clearTimeout(handle as Timer);
@@ -462,15 +473,19 @@ async function processFinalizedAttachmentBundle(
       return;
     }
 
-    await onPrompt({
+    void onPrompt({
       chatId: context.chatId,
       prompt,
       startTyping: context.startTyping,
       reply: context.reply,
+    }).catch(async (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      await context.reply(formatRunFailedMessage(message));
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await context.reply(formatRunFailedMessage(message));
+    throw new AttachmentPreparationError(message, error);
   }
 }
 
@@ -585,6 +600,13 @@ function pickLargestPhoto(photos: TelegramPhotoSize[]): TelegramPhotoSize | null
   return photos.reduce((largest, current) =>
     current.width * current.height > largest.width * largest.height ? current : largest,
   );
+}
+
+class AttachmentPreparationError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = "AttachmentPreparationError";
+  }
 }
 
 type TelegramDocumentMessage = {

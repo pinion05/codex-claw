@@ -159,13 +159,9 @@ export async function saveTelegramMessageBundle(
     };
     await writeTelegramMessageBundleJson(path.join(stagingDir, "bundle.json"), bundle);
     await mkdir(path.dirname(bundleDir), { recursive: true });
-    await publishTelegramMessageBundle(stagingDir, bundleDir);
+    const publishedBundle = await publishTelegramMessageBundle(stagingDir, bundleDir, bundleJsonPath, bundle);
 
-    return {
-      bundleDir,
-      bundleJsonPath,
-      bundle,
-    };
+    return publishedBundle;
   } catch (error) {
     await cleanupTelegramMessageBundleStagingDirectory(stagingDir);
     throw error;
@@ -361,11 +357,28 @@ async function tryReadExistingTelegramMessageBundle(
   };
 }
 
-async function publishTelegramMessageBundle(stagingDir: string, bundleDir: string): Promise<void> {
+async function publishTelegramMessageBundle(
+  stagingDir: string,
+  bundleDir: string,
+  bundleJsonPath: string,
+  bundle: TelegramMessageBundle,
+): Promise<SavedTelegramMessageBundle> {
   try {
     await rename(stagingDir, bundleDir);
+    return {
+      bundleDir,
+      bundleJsonPath,
+      bundle,
+    };
   } catch (error) {
     if (isBundlePublishConflictError(error)) {
+      const existingBundle = await tryReadExistingTelegramMessageBundle(bundleDir);
+
+      if (existingBundle) {
+        await cleanupTelegramMessageBundleStagingDirectory(stagingDir);
+        return existingBundle;
+      }
+
       throw new Error(`Telegram message bundle already exists at ${bundleDir}`);
     }
 

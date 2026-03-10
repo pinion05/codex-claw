@@ -65,28 +65,38 @@ async function loadTelegramMessageBundleModule(): Promise<TelegramMessageBundleM
   return import(`../../src/files/telegram-message-bundle.ts?test=${Date.now()}-${Math.random()}`);
 }
 
-async function loadTelegramMessageBundleModuleWithWriteFailure(
-  shouldFail: (targetPath: string) => boolean,
-  message: string,
+async function loadTelegramMessageBundleModuleWithFsOverrides(
+  overrides: Partial<typeof actualFsPromises>,
 ): Promise<TelegramMessageBundleModule> {
   mock.module("node:fs/promises", async () => {
     return {
       ...actualFsPromises,
-      writeFile: async (
-        targetPath: Parameters<typeof actualFsPromises.writeFile>[0],
-        data: Parameters<typeof actualFsPromises.writeFile>[1],
-        options?: Parameters<typeof actualFsPromises.writeFile>[2],
-      ) => {
-        if (shouldFail(String(targetPath))) {
-          throw new Error(message);
-        }
-
-        return actualFsPromises.writeFile(targetPath, data, options);
-      },
+      ...overrides,
     };
   });
 
-  return loadTelegramMessageBundleModule();
+  const module = await loadTelegramMessageBundleModule();
+  mock.restore();
+  return module;
+}
+
+async function loadTelegramMessageBundleModuleWithWriteFailure(
+  shouldFail: (targetPath: string) => boolean,
+  message: string,
+): Promise<TelegramMessageBundleModule> {
+  return loadTelegramMessageBundleModuleWithFsOverrides({
+    writeFile: async (
+      targetPath: Parameters<typeof actualFsPromises.writeFile>[0],
+      data: Parameters<typeof actualFsPromises.writeFile>[1],
+      options?: Parameters<typeof actualFsPromises.writeFile>[2],
+    ) => {
+      if (shouldFail(String(targetPath))) {
+        throw new Error(message);
+      }
+
+      return actualFsPromises.writeFile(targetPath, data, options);
+    },
+  });
 }
 
 function expectNoStagingResidue(workspaceDir: string) {
@@ -280,6 +290,67 @@ describe("saveTelegramMessageBundle", () => {
 
       expect(secondResult.bundle).toEqual(firstResult.bundle);
       expect(savedBundle.caption).toBe("first");
+      expectNoStagingResidue(workspaceDir);
+    } finally {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("reuses the winner bundle when publish hits an EEXIST race", async () => {
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-telegram-bundle-"));
+    const bundleDir = path.join(workspaceDir, "inbox", "90", "700");
+    const bundleJsonPath = path.join(bundleDir, "bundle.json");
+    const winnerBundle = createBundle({
+      chatId: 90,
+      messageId: 700,
+      caption: "winner",
+      attachments: [
+        createAttachment({
+          name: "winner.txt",
+          path: path.join(bundleDir, "1-winner.txt"),
+          mimeType: "text/plain",
+          sizeBytes: 6,
+        }),
+      ],
+      failedAttachments: [],
+    });
+
+    try {
+      const { saveTelegramMessageBundle } = await loadTelegramMessageBundleModuleWithFsOverrides({
+        rename: async (
+          fromPath: Parameters<typeof actualFsPromises.rename>[0],
+          toPath: Parameters<typeof actualFsPromises.rename>[1],
+        ) => {
+          if (
+            String(toPath) === bundleDir &&
+            String(fromPath).includes(".telegram-message-bundle-")
+          ) {
+            await actualFsPromises.mkdir(bundleDir, { recursive: true });
+            await actualFsPromises.writeFile(bundleJsonPath, JSON.stringify(winnerBundle, null, 2));
+            const error = new Error("bundle already exists") as NodeJS.ErrnoException;
+            error.code = "EEXIST";
+            throw error;
+          }
+
+          return actualFsPromises.rename(fromPath, toPath);
+        },
+      });
+
+      const result = await saveTelegramMessageBundle({
+        workspaceDir,
+        chatId: 90,
+        messageId: 700,
+        caption: "loser",
+        attachments: [
+          {
+            kind: "document",
+            name: "loser.txt",
+            bytes: new TextEncoder().encode("loser"),
+          },
+        ],
+      });
+
+      expect(result.bundle).toEqual(winnerBundle);
       expectNoStagingResidue(workspaceDir);
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });

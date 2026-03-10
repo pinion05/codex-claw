@@ -181,20 +181,19 @@ export class TelegramBundleCollector<TAttachment> {
     entry.handle = undefined;
     entry.state = "finalizing";
 
-    const finalizedBundle = {
-      ...toBundle(entry),
-      state: "completed" as const,
-    };
-
-    entry.state = "completed";
-    this.scheduleCleanup(entry);
-
     try {
+      const finalizedBundle = {
+        ...toBundle(entry),
+        state: "finalizing" as const,
+      };
+
       await this.onFinalize?.(finalizedBundle);
+      entry.state = "completed";
     } catch {
-      // Collection is already finalized at this point. Processing failures are
-      // surfaced by the caller and should not reopen the bundle.
+      entry.state = "failed";
     }
+
+    this.scheduleCleanup(entry);
   }
 
   private scheduleCleanup(entry: InternalBundleEntry<TAttachment>): void {

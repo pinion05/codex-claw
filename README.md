@@ -158,7 +158,7 @@ Notes:
 - Scheduled jobs run in fresh Codex threads, separate from the active Telegram chat thread.
 - Cron results may still notify the persisted Telegram chat even though the Codex execution happens in a fresh thread.
 - A delivery failure does not mean the scheduled prompt did not run; execution and delivery are tracked separately.
-- If there is no persisted target chat yet, the cron job will skip instead of sending a notification.
+- If there is no persisted target chat yet, the cron job will skip execution entirely instead of running without a delivery target.
 - If an interactive run is currently active, the cron job will skip that scheduled minute instead of competing with the live turn.
 
 ## Commands

@@ -42,6 +42,12 @@ class FakeScheduler implements TelegramBundleCollectorScheduler {
   }
 }
 
+async function flushAsyncWork(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 type FakeContext = {
   chat: { id: number };
   message: Record<string, unknown>;
@@ -518,6 +524,7 @@ describe("registerBotHandlers", () => {
     expect(runTurn).not.toHaveBeenCalled();
 
     await scheduler.runNext();
+    await flushAsyncWork();
 
     const preparedInput = prepareAttachments.mock.calls[0]?.[0] as
       | { attachments?: unknown[] }
@@ -605,6 +612,7 @@ describe("registerBotHandlers", () => {
 
     await firstDispatch;
     await scheduler.runNext();
+    await flushAsyncWork();
 
     const preparedInput = prepareAttachments.mock.calls[0]?.[0] as
       | { messageId?: number; attachments?: Array<{ name?: string }> }
@@ -727,6 +735,7 @@ describe("registerBotHandlers", () => {
     expect(runTurn).not.toHaveBeenCalled();
 
     await scheduler.runNext();
+    await flushAsyncWork();
 
     const preparedInput = prepareAttachments.mock.calls[0]?.[0];
 
@@ -796,6 +805,7 @@ describe("registerBotHandlers", () => {
     );
 
     await scheduler.runNext();
+    await flushAsyncWork();
 
     const preparedInput = prepareAttachments.mock.calls[0]?.[0];
 
