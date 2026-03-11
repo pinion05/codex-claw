@@ -59,7 +59,9 @@ On startup, the CLI also attempts to install packaged skills to:
 ```
 
 Those skills can be used by Codex to create scheduled job definition files and to prefer `npx -y agentty-cli` for interactive CLI login and approval flows.
+When Codex needs to return a generated local file to the user, it must use the packaged `codex-claw-telegram-file-send` skill so delivery goes to the current active `codex-claw` Telegram chat.
 The packaged `codex-claw-telegram-file-send` skill lets Codex send one local file to the current active `codex-claw` Telegram chat as a Telegram document.
+For this workflow, do not route file delivery through generic Telegram skills or Saved Messages style destinations.
 
 If you want the CLI to sync the Telegram slash-command menu on startup, enable it explicitly:
 

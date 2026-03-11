@@ -1,6 +1,6 @@
 ---
 name: codex-claw-telegram-file-send
-description: Send one local file to the current active codex-claw Telegram chat as a document.
+description: MUST use this skill when sending one local file back to the user in codex-claw. It sends a document to the current active codex-claw Telegram chat instead of generic Telegram destinations like Saved Messages.
 ---
 
 # codex-claw-telegram-file-send
@@ -19,9 +19,11 @@ Examples:
 
 ## Rules
 
+- MUST use this skill when the user asks you to send a local file back through `codex-claw`.
 - This skill currently sends exactly one file.
 - The file is sent as a Telegram `document`.
 - The target is the current active `codex-claw` Telegram chat from local session state.
+- Do not use generic Telegram send paths like Saved Messages or unrelated Telegram skills for this workflow.
 - If there is no active session or no Telegram bot token, the script fails with a clear error.
 
 ## Command

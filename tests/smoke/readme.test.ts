@@ -15,6 +15,8 @@ describe("README", () => {
     expect(readme).toContain("npx -y agentty-cli");
     expect(readme).toContain("send one local file");
     expect(readme).toContain("current active `codex-claw` Telegram chat");
+    expect(readme).toContain("must use the packaged `codex-claw-telegram-file-send` skill");
+    expect(readme).toContain("do not route file delivery through generic Telegram skills");
     expect(readme).toContain("/start");
     expect(readme).toContain("/status");
     expect(readme).toContain("/reset");
