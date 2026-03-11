@@ -55,9 +55,11 @@ On startup, the CLI also attempts to install packaged skills to:
 ```text
 ~/.codex/skills/codex-claw-cronjob-creator/SKILL.md
 ~/.codex/skills/codex-claw-agentty/SKILL.md
+~/.codex/skills/codex-claw-telegram-file-send/SKILL.md
 ```
 
 Those skills can be used by Codex to create scheduled job definition files and to prefer `npx -y agentty-cli` for interactive CLI login and approval flows.
+The packaged `codex-claw-telegram-file-send` skill lets Codex send one local file to the current active `codex-claw` Telegram chat as a Telegram document.
 
 ## Telegram Usage
 
