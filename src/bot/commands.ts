@@ -1,12 +1,7 @@
-import {
-  getSupportedCommandNames,
-  type CommandName,
-} from "./command-definitions";
-
-const allowed = new Set<string>(getSupportedCommandNames());
+import { getSupportedCommandNames } from "./command-definitions";
 
 export type ParsedCommand = {
-  name: CommandName;
+  name: string;
   args: string;
 };
 
@@ -30,6 +25,6 @@ export function parseCommand(text: string): ParsedCommand | null {
   };
 }
 
-function isCommandName(value: string): value is CommandName {
-  return allowed.has(value);
+function isCommandName(value: string): value is string {
+  return getSupportedCommandNames().includes(value);
 }

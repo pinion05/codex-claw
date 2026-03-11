@@ -11,11 +11,9 @@ import type {
   TelegramMessageAttachmentInput,
 } from "../files/telegram-message-bundle";
 import type { AbortRunResult, ResetSessionResult } from "../runtime/agent-runtime";
-import { commandDefinitions } from "./command-definitions";
+import { dispatchCommand } from "./command-definitions";
 import { parseCommand } from "./commands";
 import {
-  formatAbortMessage,
-  formatResetMessage,
   formatRunAbortedMessage,
   formatRunCompletedMessage,
   formatRunFailedMessage,
@@ -167,37 +165,21 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
         const command = parseCommand(text);
 
         if (command) {
-          const commandDefinition = commandDefinitions.find(
-            (definition) => definition.name === command.name,
-          );
+          const commandReply = await dispatchCommand(command.name, {
+            chatId,
+            deps,
+          });
 
-          if (!commandDefinition) {
+          if (commandReply == null) {
+            console.error(`[codex-claw] command dispatch failed for /${command.name}`);
             await replyAfterStoppingTyping(
-              formatRunFailedMessage(`Unsupported command dispatch for /${command.name}.`),
+              formatRunFailedMessage("Command handling is temporarily unavailable."),
             );
             return;
           }
 
-          switch (commandDefinition.kind) {
-            case "help":
-              await replyAfterStoppingTyping(buildHelpMessage());
-              return;
-            case "status":
-              await replyAfterStoppingTyping(await deps.getStatusMessage(chatId));
-              return;
-            case "reset":
-              await replyAfterStoppingTyping(formatResetMessage(await deps.resetSession(chatId)));
-              return;
-            case "abort": {
-              await replyAfterStoppingTyping(formatAbortMessage(await deps.abortRun(chatId)));
-              return;
-            }
-            default:
-              await replyAfterStoppingTyping(
-                formatRunFailedMessage(`Unsupported command dispatch for /${command.name}.`),
-              );
-              return;
-          }
+          await replyAfterStoppingTyping(commandReply);
+          return;
         }
 
         await runPrompt(chatId, text, replyAfterStoppingTyping);
@@ -333,22 +315,6 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
   }
 
   return handlers;
-}
-
-function buildHelpMessage(): string {
-  const inlineCommands = [
-    ...commandDefinitions
-      .filter((definition) => definition.name === "start")
-      .map((definition) => `/${definition.name}`),
-    ...commandDefinitions
-      .filter((definition) => definition.kind !== "help")
-      .map((definition) => `/${definition.name}`),
-    ...commandDefinitions
-      .filter((definition) => definition.kind === "help" && definition.name !== "start")
-      .map((definition) => `/${definition.name}`),
-  ];
-
-  return ["Send a prompt to run Codex.", `Available commands: ${inlineCommands.join(" ")}`].join("\n");
 }
 
 function buildIgnoredAlbumItemMessage(): string {
