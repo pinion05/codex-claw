@@ -185,8 +185,8 @@ describe("installTelegramFileSendSkill", () => {
       expect(statSync(installedPath).isFile()).toBe(true);
       expect(statSync(installedScriptPath).isFile()).toBe(true);
       expect(installedSkill).toContain("name: codex-claw-telegram-file-send");
-      expect(installedSkill).toContain("MUST use this skill");
-      expect(installedSkill).toContain("Do not use generic Telegram send paths");
+      expect(installedSkill).toContain("MUST use this skill for any codex-claw request");
+      expect(installedSkill).toContain("NEVER use generic Telegram send commands");
       expect(readFileSync(installedScriptPath, "utf8")).toContain("sendFileToActiveChat");
     } finally {
       rmSync(root, { force: true, recursive: true });

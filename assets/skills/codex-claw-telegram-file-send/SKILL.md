@@ -1,6 +1,6 @@
 ---
 name: codex-claw-telegram-file-send
-description: MUST use this skill when sending one local file back to the user in codex-claw. It sends a document to the current active codex-claw Telegram chat instead of generic Telegram destinations like Saved Messages.
+description: MUST use this skill for any codex-claw request to send or return one local file to the user. NEVER use generic Telegram send commands, Saved Messages, or unrelated Telegram skills for codex-claw file delivery.
 ---
 
 # codex-claw-telegram-file-send
