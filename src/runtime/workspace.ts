@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   installAgenttySkill as installAgenttySkillDefault,
   installCronjobCreatorSkill as installCronjobCreatorSkillDefault,
+  installTelegramFileSendSkill as installTelegramFileSendSkillDefault,
 } from "./install-codex-skill";
 
 type PackagedSkillInstaller = {
@@ -31,6 +32,10 @@ export async function ensureWorkspaceDirectories(
     {
       install: installAgenttySkillDefault,
       label: "agentty skill",
+    },
+    {
+      install: installTelegramFileSendSkillDefault,
+      label: "Telegram file-send skill",
     },
   ];
 

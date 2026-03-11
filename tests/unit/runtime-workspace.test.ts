@@ -6,6 +6,7 @@ import {
   installAgenttySkill,
   installCronjobCreatorSkill,
   installPackagedSkill,
+  installTelegramFileSendSkill,
 } from "../../src/runtime/install-codex-skill";
 import { ensureWorkspaceDirectories } from "../../src/runtime/workspace";
 
@@ -62,6 +63,39 @@ describe("installPackagedSkill", () => {
       });
 
       expect(readFileSync(installedPath, "utf8")).toBe("# New Skill\n");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  test("copies packaged skill scripts alongside SKILL.md", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-workspace-"));
+    const packagedSkillPath = path.join(root, "assets", "skills", "test-skill", "SKILL.md");
+    const packagedScriptPath = path.join(root, "assets", "skills", "test-skill", "scripts", "send-file.js");
+    const codexHomeDir = path.join(root, ".codex");
+
+    try {
+      mkdirSync(path.dirname(packagedScriptPath), { recursive: true });
+      writeFileSync(packagedSkillPath, "# Test Skill\n");
+      writeFileSync(packagedScriptPath, "console.log('send');\n");
+
+      const installedPath = await installPackagedSkill({
+        skillName: "test-skill",
+        packagedSkillPath,
+        codexHomeDir,
+      });
+
+      const installedScriptPath = path.join(
+        codexHomeDir,
+        "skills",
+        "test-skill",
+        "scripts",
+        "send-file.js",
+      );
+
+      expect(installedPath).toBe(path.join(codexHomeDir, "skills", "test-skill", "SKILL.md"));
+      expect(statSync(installedScriptPath).isFile()).toBe(true);
+      expect(readFileSync(installedScriptPath, "utf8")).toContain("console.log('send')");
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -132,8 +166,34 @@ describe("installAgenttySkill", () => {
   });
 });
 
+describe("installTelegramFileSendSkill", () => {
+  test("uses the packaged default skill asset when no source path override is provided", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-workspace-"));
+    const codexHomeDir = path.join(root, ".codex");
+
+    try {
+      const installedPath = await installTelegramFileSendSkill({ codexHomeDir });
+      const installedSkill = readFileSync(installedPath, "utf8");
+      const installedScriptPath = path.join(
+        codexHomeDir,
+        "skills",
+        "codex-claw-telegram-file-send",
+        "scripts",
+        "send-file.js",
+      );
+
+      expect(statSync(installedPath).isFile()).toBe(true);
+      expect(statSync(installedScriptPath).isFile()).toBe(true);
+      expect(installedSkill).toContain("name: codex-claw-telegram-file-send");
+      expect(readFileSync(installedScriptPath, "utf8")).toContain("sendFileToActiveChat");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+});
+
 describe("ensureWorkspaceDirectories", () => {
-  test("installs both packaged skills through the default startup path", async () => {
+  test("installs all packaged skills through the default startup path", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-workspace-"));
     const workspaceDir = path.join(root, "workspace");
     const cronSkillPath = path.join(
@@ -144,6 +204,21 @@ describe("ensureWorkspaceDirectories", () => {
       "SKILL.md",
     );
     const agenttySkillPath = path.join(root, ".codex", "skills", "codex-claw-agentty", "SKILL.md");
+    const telegramFileSendSkillPath = path.join(
+      root,
+      ".codex",
+      "skills",
+      "codex-claw-telegram-file-send",
+      "SKILL.md",
+    );
+    const telegramFileSendScriptPath = path.join(
+      root,
+      ".codex",
+      "skills",
+      "codex-claw-telegram-file-send",
+      "scripts",
+      "send-file.js",
+    );
 
     try {
       process.env.HOME = root;
@@ -152,8 +227,13 @@ describe("ensureWorkspaceDirectories", () => {
 
       expect(statSync(cronSkillPath).isFile()).toBe(true);
       expect(statSync(agenttySkillPath).isFile()).toBe(true);
+      expect(statSync(telegramFileSendSkillPath).isFile()).toBe(true);
+      expect(statSync(telegramFileSendScriptPath).isFile()).toBe(true);
       expect(readFileSync(cronSkillPath, "utf8")).toContain("name: codex-claw-cronjob-creator");
       expect(readFileSync(agenttySkillPath, "utf8")).toContain("name: codex-claw-agentty");
+      expect(readFileSync(telegramFileSendSkillPath, "utf8")).toContain(
+        "name: codex-claw-telegram-file-send",
+      );
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -163,6 +243,7 @@ describe("ensureWorkspaceDirectories", () => {
     const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-runtime-workspace-"));
     const installCronjobCreatorSkill = mock(async () => undefined);
     const installAgenttySkill = mock(async () => undefined);
+    const installTelegramFileSendSkill = mock(async () => undefined);
 
     try {
       await ensureWorkspaceDirectories(path.join(workspaceDir, "workspace"), {
@@ -175,6 +256,10 @@ describe("ensureWorkspaceDirectories", () => {
             install: installAgenttySkill,
             label: "agentty skill",
           },
+          {
+            install: installTelegramFileSendSkill,
+            label: "Telegram file-send skill",
+          },
         ],
       });
 
@@ -183,6 +268,7 @@ describe("ensureWorkspaceDirectories", () => {
       expect(statSync(path.join(workspaceDir, "workspace", "logs")).isDirectory()).toBe(true);
       expect(installCronjobCreatorSkill).toHaveBeenCalledTimes(1);
       expect(installAgenttySkill).toHaveBeenCalledTimes(1);
+      expect(installTelegramFileSendSkill).toHaveBeenCalledTimes(1);
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });
     }
