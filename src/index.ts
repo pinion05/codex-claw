@@ -1,5 +1,6 @@
 import { Bot } from "grammy";
 import { registerBotHandlers } from "./bot/create-bot";
+import { syncTelegramCommands } from "./bot/telegram-command-sync";
 import { createLocalConfigStore } from "./config/local-config";
 import { promptForTelegramBotToken, resolveTelegramBotTokenWithStore } from "./config/telegram-bot-token";
 import { loadConfig } from "./config";
@@ -33,6 +34,7 @@ export async function main(): Promise<void> {
   });
 
   registerBotHandlers(bot, handlers);
+  void syncTelegramCommands(bot);
 
   if (telegramToken.source === "prompt") {
     console.info(`[codex-claw] saved TELEGRAM_BOT_TOKEN to ${localConfigStore.path}`);

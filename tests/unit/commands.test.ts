@@ -1,7 +1,32 @@
 import { describe, expect, test } from "bun:test";
+import {
+  getSupportedCommandNames,
+  toTelegramCommandPayload,
+} from "../../src/bot/command-definitions";
 import { parseCommand } from "../../src/bot/commands";
 
 describe("parseCommand", () => {
+  test("exports supported command names from the registry", () => {
+    expect(getSupportedCommandNames()).toEqual([
+      "start",
+      "help",
+      "status",
+      "reset",
+      "abort",
+    ]);
+  });
+
+  test("builds Telegram command payloads from the registry", () => {
+    expect(toTelegramCommandPayload()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: "status",
+          description: expect.any(String),
+        }),
+      ]),
+    );
+  });
+
   test("parses supported slash commands", () => {
     expect(parseCommand("/status")).toEqual({ name: "status", args: "" });
     expect(parseCommand("/reset")).toEqual({ name: "reset", args: "" });

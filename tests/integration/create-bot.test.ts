@@ -2,6 +2,10 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  commandDefinitions,
+  toTelegramCommandPayload,
+} from "../../src/bot/command-definitions";
 import type { TelegramBundleCollectorScheduler } from "../../src/files/telegram-bundle-collector";
 import { createBotHandlers, registerBotHandlers } from "../../src/bot/create-bot";
 import { createRuntimeDeps } from "../../src/runtime/create-runtime-deps";
@@ -58,6 +62,13 @@ type FakeContext = {
   replyWithChatAction: ReturnType<typeof mock>;
 };
 
+type MutableCommandDefinition = {
+  name: string;
+  kind: string;
+  helpDescription: string;
+  telegramDescription: string;
+};
+
 class FakeBot {
   readonly token = "test-token";
   private readonly handlers = new Map<string, Array<(ctx: FakeContext) => Promise<void>>>();
@@ -90,6 +101,17 @@ function createDeferred<T>() {
     resolve,
     reject,
   };
+}
+
+function snapshotCommandDefinitions() {
+  return (commandDefinitions as unknown as MutableCommandDefinition[]).map((definition) => ({
+    ...definition,
+  }));
+}
+
+function restoreCommandDefinitions(snapshot: MutableCommandDefinition[]) {
+  const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+  mutableCommandDefinitions.splice(0, mutableCommandDefinitions.length, ...snapshot);
 }
 
 function createDocumentContext(options: {
@@ -313,6 +335,187 @@ describe("createBotHandlers", () => {
     expect(replies[0]).toContain("/status");
     expect(replies[0]).toContain("/reset");
     expect(replies[0]).toContain("/abort");
+  });
+
+  test("help derives its advertised commands from the registry", async () => {
+    const replies: string[] = [];
+    const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+    const originalDefinitions = snapshotCommandDefinitions();
+
+    mutableCommandDefinitions.push({
+      name: "review",
+      kind: "help",
+      helpDescription: "show review guidance",
+      telegramDescription: "Show review guidance",
+    });
+
+    try {
+      const handlers = createBotHandlers({
+        getStatusMessage: mock(async () => "idle"),
+        resetSession: mock(async () => ({ ok: true as const })),
+        abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+        runTurn: mock(async () => ({ summary: "done" })),
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/help",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+    } finally {
+      restoreCommandDefinitions(originalDefinitions);
+    }
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toBe(
+      "Send a prompt to run Codex.\nAvailable commands: /start /status /reset /abort /help /review",
+    );
+  });
+
+  test("dispatches control commands by registry kind instead of hard-coded names", async () => {
+    const replies: string[] = [];
+    const getStatusMessage = mock(async () => "idle");
+    const resetSession = mock(async () => ({ ok: false as const, reason: "running" as const }));
+    const abortRun = mock(async () => ({ ok: true as const, alreadyRequested: false }));
+    const runTurn = mock(async () => ({ summary: "done" }));
+    const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+    const originalDefinitions = snapshotCommandDefinitions();
+
+    const setKind = (name: string, kind: string) => {
+      const definition = mutableCommandDefinitions.find((entry) => entry.name === name);
+
+      if (!definition) {
+        throw new Error(`Missing command definition for ${name}`);
+      }
+
+      definition.kind = kind;
+    };
+
+    setKind("status", "help");
+    setKind("reset", "status");
+    setKind("abort", "reset");
+    setKind("help", "abort");
+
+    try {
+      const handlers = createBotHandlers({
+        getStatusMessage,
+        resetSession,
+        abortRun,
+        runTurn,
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/status",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/reset",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/abort",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/help",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+    } finally {
+      restoreCommandDefinitions(originalDefinitions);
+    }
+
+    expect(replies[0]).toContain("Send a prompt to run Codex.");
+    expect(replies[1]).toBe("idle");
+    expect(replies[2]).toContain("use /abort first");
+    expect(replies[3]).toContain("Abort requested");
+    expect(getStatusMessage).toHaveBeenCalledTimes(1);
+    expect(resetSession).toHaveBeenCalledTimes(1);
+    expect(abortRun).toHaveBeenCalledTimes(1);
+    expect(runTurn).not.toHaveBeenCalled();
+  });
+
+  test("does not fall through to runTurn when a recognized command cannot be dispatched", async () => {
+    const replies: string[] = [];
+    const getStatusMessage = mock(async () => "idle");
+    const resetSession = mock(async () => ({ ok: true as const }));
+    const abortRun = mock(async () => ({ ok: true as const, alreadyRequested: false }));
+    const runTurn = mock(async () => ({ summary: "done" }));
+    const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+    const originalDefinitions = snapshotCommandDefinitions();
+
+    const statusDefinition = mutableCommandDefinitions.find((definition) => definition.name === "status");
+    const resetDefinition = mutableCommandDefinitions.find((definition) => definition.name === "reset");
+
+    if (!statusDefinition || !resetDefinition) {
+      throw new Error("Missing command definitions for test setup");
+    }
+
+    statusDefinition.kind = "unknown";
+    resetDefinition.name = "reset-renamed";
+
+    try {
+      const handlers = createBotHandlers({
+        getStatusMessage,
+        resetSession,
+        abortRun,
+        runTurn,
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/status",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/reset",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+    } finally {
+      restoreCommandDefinitions(originalDefinitions);
+    }
+
+    expect(replies).toEqual([
+      "Run failed. Error:\nUnsupported command dispatch for /status.",
+      "Run failed. Error:\nUnsupported command dispatch for /reset.",
+    ]);
+    expect(getStatusMessage).not.toHaveBeenCalled();
+    expect(resetSession).not.toHaveBeenCalled();
+    expect(abortRun).not.toHaveBeenCalled();
+    expect(runTurn).not.toHaveBeenCalled();
+  });
+
+  test("restores registry metadata needed by later Telegram command payloads", () => {
+    expect(toTelegramCommandPayload()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: "status",
+          description: expect.any(String),
+        }),
+      ]),
+    );
   });
 
   test("replies with an explicit aborted message when the runtime aborts", async () => {

@@ -1,7 +1,9 @@
-const allowedCommands = ["start", "help", "status", "reset", "abort"] as const;
-const allowed = new Set<string>(allowedCommands);
+import {
+  getSupportedCommandNames,
+  type CommandName,
+} from "./command-definitions";
 
-type CommandName = (typeof allowedCommands)[number];
+const allowed = new Set<string>(getSupportedCommandNames());
 
 export type ParsedCommand = {
   name: CommandName;

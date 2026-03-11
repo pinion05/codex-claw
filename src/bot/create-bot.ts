@@ -11,6 +11,7 @@ import type {
   TelegramMessageAttachmentInput,
 } from "../files/telegram-message-bundle";
 import type { AbortRunResult, ResetSessionResult } from "../runtime/agent-runtime";
+import { commandDefinitions } from "./command-definitions";
 import { parseCommand } from "./commands";
 import {
   formatAbortMessage,
@@ -166,8 +167,18 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
         const command = parseCommand(text);
 
         if (command) {
-          switch (command.name) {
-            case "start":
+          const commandDefinition = commandDefinitions.find(
+            (definition) => definition.name === command.name,
+          );
+
+          if (!commandDefinition) {
+            await replyAfterStoppingTyping(
+              formatRunFailedMessage(`Unsupported command dispatch for /${command.name}.`),
+            );
+            return;
+          }
+
+          switch (commandDefinition.kind) {
             case "help":
               await replyAfterStoppingTyping(buildHelpMessage());
               return;
@@ -181,6 +192,11 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
               await replyAfterStoppingTyping(formatAbortMessage(await deps.abortRun(chatId)));
               return;
             }
+            default:
+              await replyAfterStoppingTyping(
+                formatRunFailedMessage(`Unsupported command dispatch for /${command.name}.`),
+              );
+              return;
           }
         }
 
@@ -320,9 +336,19 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
 }
 
 function buildHelpMessage(): string {
-  return ["Send a prompt to run Codex.", "Available commands: /start /status /reset /abort /help"].join(
-    "\n",
-  );
+  const inlineCommands = [
+    ...commandDefinitions
+      .filter((definition) => definition.name === "start")
+      .map((definition) => `/${definition.name}`),
+    ...commandDefinitions
+      .filter((definition) => definition.kind !== "help")
+      .map((definition) => `/${definition.name}`),
+    ...commandDefinitions
+      .filter((definition) => definition.kind === "help" && definition.name !== "start")
+      .map((definition) => `/${definition.name}`),
+  ];
+
+  return ["Send a prompt to run Codex.", `Available commands: ${inlineCommands.join(" ")}`].join("\n");
 }
 
 function buildIgnoredAlbumItemMessage(): string {
