@@ -39,4 +39,16 @@ describe("README", () => {
     expect(readme).not.toContain("CODEX_WORKSPACE_DIR");
     expect(readme).not.toContain(".env.example");
   });
+
+  test("documents startup Telegram command sync behavior", () => {
+    const readme = readFileSync("README.md", "utf8");
+
+    expect(readme).toContain("TELEGRAM_SYNC_COMMANDS=1");
+    expect(readme).toContain(
+      "When enabled, the CLI attempts to sync the Telegram slash-command menu so it stays aligned with the commands the bot actually supports.",
+    );
+    expect(readme).toContain(
+      "If Telegram rejects that sync request, bot startup still continues and the CLI only logs a warning.",
+    );
+  });
 });

@@ -35,11 +35,13 @@ describe("loadConfig", () => {
         TELEGRAM_BOT_TOKEN: "telegram-token",
         OPENAI_API_KEY: "openai-key",
         CODEX_WORKSPACE_DIR: "/tmp/claw",
+        TELEGRAM_SYNC_COMMANDS: "true",
       }),
     ).toEqual({
       telegramBotToken: "telegram-token",
       openAiApiKey: "openai-key",
       workspaceDir: "/tmp/claw",
+      syncTelegramCommandsOnStartup: true,
     });
   });
 
@@ -52,6 +54,7 @@ describe("loadConfig", () => {
       telegramBotToken: "telegram-token",
       openAiApiKey: null,
       workspaceDir: resolveWorkspaceDir({}),
+      syncTelegramCommandsOnStartup: false,
     });
   });
 
@@ -60,6 +63,15 @@ describe("loadConfig", () => {
       telegramBotToken: null,
       openAiApiKey: null,
       workspaceDir: resolveWorkspaceDir({}),
+      syncTelegramCommandsOnStartup: false,
     });
+  });
+
+  test("treats TELEGRAM_SYNC_COMMANDS as a boolean flag", () => {
+    expect(loadConfig({ TELEGRAM_SYNC_COMMANDS: "1" }).syncTelegramCommandsOnStartup).toBe(true);
+    expect(loadConfig({ TELEGRAM_SYNC_COMMANDS: "yes" }).syncTelegramCommandsOnStartup).toBe(true);
+    expect(loadConfig({ TELEGRAM_SYNC_COMMANDS: "false" }).syncTelegramCommandsOnStartup).toBe(
+      false,
+    );
   });
 });

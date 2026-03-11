@@ -1,10 +1,7 @@
-const allowedCommands = ["start", "help", "status", "reset", "abort"] as const;
-const allowed = new Set<string>(allowedCommands);
-
-type CommandName = (typeof allowedCommands)[number];
+import { getSupportedCommandNames } from "./command-definitions";
 
 export type ParsedCommand = {
-  name: CommandName;
+  name: string;
   args: string;
 };
 
@@ -28,6 +25,6 @@ export function parseCommand(text: string): ParsedCommand | null {
   };
 }
 
-function isCommandName(value: string): value is CommandName {
-  return allowed.has(value);
+function isCommandName(value: string): value is string {
+  return getSupportedCommandNames().includes(value);
 }

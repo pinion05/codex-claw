@@ -2,6 +2,10 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  commandDefinitions,
+  toTelegramCommandPayload,
+} from "../../src/bot/command-definitions";
 import type { TelegramBundleCollectorScheduler } from "../../src/files/telegram-bundle-collector";
 import { createBotHandlers, registerBotHandlers } from "../../src/bot/create-bot";
 import { createRuntimeDeps } from "../../src/runtime/create-runtime-deps";
@@ -58,6 +62,23 @@ type FakeContext = {
   replyWithChatAction: ReturnType<typeof mock>;
 };
 
+type MutableCommandDefinition = {
+  name: string;
+  helpDescription: string;
+  telegramDescription: string;
+  run: (input: {
+    chatId: bigint;
+    deps: {
+      getStatusMessage: (chatId: bigint) => Promise<string>;
+      resetSession: (chatId: bigint) => Promise<{ ok: true } | { ok: false; reason: "running" }>;
+      abortRun: (chatId: bigint) => Promise<
+        | { ok: true; alreadyRequested: boolean; recoveredStale?: boolean }
+        | { ok: false; reason: "not-running" }
+      >;
+    };
+  }) => Promise<string>;
+};
+
 class FakeBot {
   readonly token = "test-token";
   private readonly handlers = new Map<string, Array<(ctx: FakeContext) => Promise<void>>>();
@@ -90,6 +111,17 @@ function createDeferred<T>() {
     resolve,
     reject,
   };
+}
+
+function snapshotCommandDefinitions() {
+  return (commandDefinitions as unknown as MutableCommandDefinition[]).map((definition) => ({
+    ...definition,
+  }));
+}
+
+function restoreCommandDefinitions(snapshot: MutableCommandDefinition[]) {
+  const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+  mutableCommandDefinitions.splice(0, mutableCommandDefinitions.length, ...snapshot);
 }
 
 function createDocumentContext(options: {
@@ -313,6 +345,126 @@ describe("createBotHandlers", () => {
     expect(replies[0]).toContain("/status");
     expect(replies[0]).toContain("/reset");
     expect(replies[0]).toContain("/abort");
+  });
+
+  test("help derives its advertised commands from the registry", async () => {
+    const replies: string[] = [];
+    const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+    const originalDefinitions = snapshotCommandDefinitions();
+
+    mutableCommandDefinitions.push({
+      name: "review",
+      helpDescription: "show review guidance",
+      telegramDescription: "Show review guidance",
+      run: async () => "review guidance",
+    });
+
+    try {
+      const handlers = createBotHandlers({
+        getStatusMessage: mock(async () => "idle"),
+        resetSession: mock(async () => ({ ok: true as const })),
+        abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+        runTurn: mock(async () => ({ summary: "done" })),
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/help",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+    } finally {
+      restoreCommandDefinitions(originalDefinitions);
+    }
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toBe(
+      "Send a prompt to run Codex.\nAvailable commands: /start /status /reset /abort /help /review",
+    );
+  });
+
+  test("dispatches commands from registry definitions without hard-coded command names", async () => {
+    const replies: string[] = [];
+    const getStatusMessage = mock(async () => "idle");
+    const resetSession = mock(async () => ({ ok: false as const, reason: "running" as const }));
+    const abortRun = mock(async () => ({ ok: true as const, alreadyRequested: false }));
+    const runTurn = mock(async () => ({ summary: "done" }));
+    const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+    const originalDefinitions = snapshotCommandDefinitions();
+    const statusDefinition = mutableCommandDefinitions.find((definition) => definition.name === "status");
+
+    if (!statusDefinition) {
+      throw new Error("Missing status command definition for test setup");
+    }
+
+    statusDefinition.name = "inspect";
+
+    try {
+      const handlers = createBotHandlers({
+        getStatusMessage,
+        resetSession,
+        abortRun,
+        runTurn,
+      });
+
+      await handlers.onText({
+        chatId: 123n,
+        text: "/inspect",
+        reply: async (value: string) => {
+          replies.push(value);
+        },
+      });
+    } finally {
+      restoreCommandDefinitions(originalDefinitions);
+    }
+
+    expect(replies).toEqual(["idle"]);
+    expect(getStatusMessage).toHaveBeenCalledTimes(1);
+    expect(resetSession).not.toHaveBeenCalled();
+    expect(abortRun).not.toHaveBeenCalled();
+    expect(runTurn).not.toHaveBeenCalled();
+  });
+
+  test("fails fast when the registry contains duplicate command names", async () => {
+    const mutableCommandDefinitions = commandDefinitions as unknown as MutableCommandDefinition[];
+    const originalDefinitions = snapshotCommandDefinitions();
+    mutableCommandDefinitions.push({
+      name: "status",
+      helpDescription: "duplicate status",
+      telegramDescription: "Duplicate status",
+      run: async () => "duplicate",
+    });
+
+    try {
+      const handlers = createBotHandlers({
+        getStatusMessage: mock(async () => "idle"),
+        resetSession: mock(async () => ({ ok: true as const })),
+        abortRun: mock(async () => ({ ok: true as const, alreadyRequested: false })),
+        runTurn: mock(async () => ({ summary: "done" })),
+      });
+
+      await expect(
+        handlers.onText({
+          chatId: 123n,
+          text: "/status",
+          reply: async () => undefined,
+        }),
+      ).rejects.toThrow("Duplicate command definition: status");
+    } finally {
+      restoreCommandDefinitions(originalDefinitions);
+    }
+  });
+
+  test("restores registry metadata needed by later Telegram command payloads", () => {
+    expect(toTelegramCommandPayload()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: "status",
+          description: expect.any(String),
+        }),
+      ]),
+    );
   });
 
   test("replies with an explicit aborted message when the runtime aborts", async () => {
@@ -1104,6 +1256,7 @@ describe("registerBotHandlers", () => {
         telegramBotToken: null,
         openAiApiKey: "test-key",
         workspaceDir,
+        syncTelegramCommandsOnStartup: false,
       });
 
       const prompt = await deps.prepareAttachments?.({

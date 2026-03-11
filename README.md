@@ -59,6 +59,14 @@ On startup, the CLI also attempts to install packaged skills to:
 
 Those skills can be used by Codex to create scheduled job definition files and to prefer `npx -y agentty-cli` for interactive CLI login and approval flows.
 
+If you want the CLI to sync the Telegram slash-command menu on startup, enable it explicitly:
+
+```bash
+TELEGRAM_SYNC_COMMANDS=1 bunx @npmc_5/codex-claw
+```
+
+When enabled, the CLI attempts to sync the Telegram slash-command menu so it stays aligned with the commands the bot actually supports. If Telegram rejects that sync request, bot startup still continues and the CLI only logs a warning.
+
 ## Telegram Usage
 
 Once the process is running, open your bot in Telegram and send plain text instructions.
@@ -171,6 +179,7 @@ Notes:
 
 Notes:
 
+- The Telegram slash-command menu is only synced when `TELEGRAM_SYNC_COMMANDS=1` is set at startup.
 - `/reset` only succeeds when no run is active.
 - `/abort` is best-effort cancellation for the current in-flight turn.
 - If you send a new message while a run is still active, the runtime rejects the overlapping run.

@@ -11,10 +11,9 @@ import type {
   TelegramMessageAttachmentInput,
 } from "../files/telegram-message-bundle";
 import type { AbortRunResult, ResetSessionResult } from "../runtime/agent-runtime";
+import { dispatchCommand } from "./command-definitions";
 import { parseCommand } from "./commands";
 import {
-  formatAbortMessage,
-  formatResetMessage,
   formatRunAbortedMessage,
   formatRunCompletedMessage,
   formatRunFailedMessage,
@@ -166,22 +165,21 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
         const command = parseCommand(text);
 
         if (command) {
-          switch (command.name) {
-            case "start":
-            case "help":
-              await replyAfterStoppingTyping(buildHelpMessage());
-              return;
-            case "status":
-              await replyAfterStoppingTyping(await deps.getStatusMessage(chatId));
-              return;
-            case "reset":
-              await replyAfterStoppingTyping(formatResetMessage(await deps.resetSession(chatId)));
-              return;
-            case "abort": {
-              await replyAfterStoppingTyping(formatAbortMessage(await deps.abortRun(chatId)));
-              return;
-            }
+          const commandReply = await dispatchCommand(command.name, {
+            chatId,
+            deps,
+          });
+
+          if (commandReply == null) {
+            console.error(`[codex-claw] command dispatch failed for /${command.name}`);
+            await replyAfterStoppingTyping(
+              formatRunFailedMessage("Command handling is temporarily unavailable."),
+            );
+            return;
           }
+
+          await replyAfterStoppingTyping(commandReply);
+          return;
         }
 
         await runPrompt(chatId, text, replyAfterStoppingTyping);
@@ -317,12 +315,6 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
   }
 
   return handlers;
-}
-
-function buildHelpMessage(): string {
-  return ["Send a prompt to run Codex.", "Available commands: /start /status /reset /abort /help"].join(
-    "\n",
-  );
 }
 
 function buildIgnoredAlbumItemMessage(): string {
