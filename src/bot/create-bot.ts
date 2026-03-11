@@ -64,6 +64,11 @@ type BotPromptInput = {
   reply: Reply;
 };
 
+type AttachmentPromptContext = Omit<BotPromptInput, "prompt"> & {
+  normalizedChatId: number;
+  replyToMessage?: ReplyMessage | null;
+};
+
 export type DownloadedTelegramFile = {
   bytes: Uint8Array;
   filePath: string;
@@ -224,8 +229,8 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
   });
 
   if (deps.prepareAttachments) {
-    const attachmentContexts = new Map<string, Omit<BotPromptInput, "prompt">>();
-    let immediateAttachmentContext: Omit<BotPromptInput, "prompt"> | null = null;
+    const attachmentContexts = new Map<string, AttachmentPromptContext>();
+    let immediateAttachmentContext: AttachmentPromptContext | null = null;
     const downloadTelegramFile =
       deps.downloadTelegramFile ?? createTelegramFileDownloader(bot as Bot<Context>);
     const collector = new TelegramBundleCollector<TelegramAttachmentDescriptor>({
@@ -258,7 +263,10 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
           normalizeChatId(ctx.chat.id),
           ctx.message as TelegramDocumentMessage,
         );
-        const context = createPromptContext(ctx);
+        const context = createPromptContext(
+          ctx,
+          (ctx.message as TelegramDocumentMessage).reply_to_message,
+        );
 
         if (input.mediaGroupId) {
           const key = buildTelegramBundleCollectorKey(input.chatId, input.mediaGroupId);
@@ -295,7 +303,10 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
           normalizeChatId(ctx.chat.id),
           ctx.message as TelegramPhotoMessage,
         );
-        const context = createPromptContext(ctx);
+        const context = createPromptContext(
+          ctx,
+          (ctx.message as TelegramPhotoMessage).reply_to_message,
+        );
 
         if (input.mediaGroupId) {
           const key = buildTelegramBundleCollectorKey(input.chatId, input.mediaGroupId);
@@ -344,7 +355,10 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-function createPromptContext(ctx: Context): Omit<BotPromptInput, "prompt"> {
+function createPromptContext(
+  ctx: Context,
+  replyToMessage?: ReplyMessage | null,
+): AttachmentPromptContext {
   const chatId = ctx.chat?.id;
 
   if (chatId == null) {
@@ -353,6 +367,8 @@ function createPromptContext(ctx: Context): Omit<BotPromptInput, "prompt"> {
 
   return {
     chatId: BigInt(String(chatId)),
+    normalizedChatId: normalizeChatId(chatId),
+    replyToMessage,
     startTyping: () =>
       createTypingHeartbeat({
         sendTyping: async () => {
@@ -452,9 +468,9 @@ function createPhotoBundleInput(
 
 function resolveAttachmentContext(
   bundle: TelegramBundle<TelegramAttachmentDescriptor>,
-  attachmentContexts: Map<string, Omit<BotPromptInput, "prompt">>,
-  immediateAttachmentContext: Omit<BotPromptInput, "prompt"> | null,
-): Omit<BotPromptInput, "prompt"> | null {
+  attachmentContexts: Map<string, AttachmentPromptContext>,
+  immediateAttachmentContext: AttachmentPromptContext | null,
+): AttachmentPromptContext | null {
   if (!bundle.mediaGroupId) {
     return immediateAttachmentContext;
   }
@@ -468,7 +484,7 @@ function normalizeChatId(chatId: number | bigint): number {
 
 async function processFinalizedAttachmentBundle(
   bundle: TelegramBundle<TelegramAttachmentDescriptor>,
-  context: Omit<BotPromptInput, "prompt">,
+  context: AttachmentPromptContext,
   onPrompt: (input: BotPromptInput) => Promise<void>,
   prepareAttachments:
     | ((input: TelegramAttachmentBundleInput) => Promise<string>)
@@ -477,7 +493,7 @@ async function processFinalizedAttachmentBundle(
 ): Promise<void> {
   try {
     const preparedBundle = await materializePreparedAttachmentBundle(bundle, downloadTelegramFile);
-    const prompt = await prepareAttachments?.({
+    const preparedPrompt = await prepareAttachments?.({
       chatId: preparedBundle.chatId,
       messageId: preparedBundle.messageId,
       mediaGroupId: preparedBundle.mediaGroupId,
@@ -486,9 +502,15 @@ async function processFinalizedAttachmentBundle(
       failedAttachments: preparedBundle.failedAttachments,
     });
 
-    if (!prompt) {
+    if (!preparedPrompt) {
       return;
     }
+
+    const prompt = await buildPromptWithReplyContext({
+      chatId: context.normalizedChatId,
+      messageText: preparedPrompt,
+      replyToMessage: context.replyToMessage,
+    });
 
     await onPrompt({
       chatId: context.chatId,
@@ -627,6 +649,7 @@ type TelegramDocumentMessage = {
   message_id: number;
   media_group_id?: string;
   caption?: string;
+  reply_to_message?: ReplyMessage;
   document: {
     file_id: string;
     file_name?: string;
@@ -649,5 +672,6 @@ type TelegramPhotoMessage = {
   message_id: number;
   media_group_id?: string;
   caption?: string;
+  reply_to_message?: ReplyMessage;
   photo: TelegramPhotoSize[];
 };

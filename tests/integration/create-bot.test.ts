@@ -100,6 +100,7 @@ function createDocumentContext(options: {
   fileId?: string;
   fileName?: string;
   mimeType?: string;
+  replyToMessage?: Record<string, unknown>;
   replies?: string[];
 }) {
   const replies = options.replies ?? [];
@@ -111,6 +112,7 @@ function createDocumentContext(options: {
       message_id: options.messageId,
       media_group_id: options.mediaGroupId,
       caption: options.caption,
+      reply_to_message: options.replyToMessage,
       document: {
         file_id: fileId,
         file_name: options.fileName ?? "report.txt",
@@ -134,6 +136,7 @@ function createPhotoContext(options: {
   messageId: number;
   caption?: string;
   mediaGroupId?: string;
+  replyToMessage?: Record<string, unknown>;
   replies?: string[];
   fileIdPrefix?: string;
 }) {
@@ -146,6 +149,7 @@ function createPhotoContext(options: {
       message_id: options.messageId,
       media_group_id: options.mediaGroupId,
       caption: options.caption,
+      reply_to_message: options.replyToMessage,
       photo: [
         {
           file_id: `${fileIdPrefix}-small`,
@@ -699,6 +703,53 @@ describe("registerBotHandlers", () => {
 
       rmSync(workspaceDir, { force: true, recursive: true });
     }
+  });
+
+  test("document uploads that reply to another message prepend reply context before the attachment prompt", async () => {
+    const bot = new FakeBot();
+    const replies: string[] = [];
+    const prepareAttachments = mock(async () => "Prepared attachment prompt");
+    const runTurn = mock(async () => ({ summary: "done" }));
+
+    registerBotHandlers(bot as never, {
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn,
+      prepareAttachments,
+      downloadTelegramFile: mock(async () => ({
+        bytes: new TextEncoder().encode("document body"),
+        filePath: "documents/reply-context.txt",
+        mimeType: "text/plain",
+      })),
+    });
+
+    await bot.dispatch(
+      "message:document",
+      createDocumentContext({
+        messageId: 980,
+        caption: "Please compare this file.",
+        replyToMessage: createRepliedTextMessage({
+          messageId: 979,
+          text: "Use the previous summary as context.",
+          from: createReplyAuthor({
+            firstName: "Alice",
+          }),
+        }),
+        replies,
+      }),
+    );
+
+    expect(prepareAttachments).toHaveBeenCalledTimes(1);
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    const prompt = (runTurn.mock.calls as unknown[][])[0]?.[1] as string;
+    expect(prompt).toContain("Reply context");
+    expect(prompt).toContain("- messageId: 979");
+    expect(prompt).toContain("- author: Alice");
+    expect(prompt).toContain("- text: Use the previous summary as context.");
+    expect(prompt).toContain("Current user message");
+    expect(prompt).toContain("Prepared attachment prompt");
+    expect(replies).toEqual(["done"]);
   });
 
   test("document messages prepare attachments and run one turn", async () => {
