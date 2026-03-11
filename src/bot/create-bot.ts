@@ -19,6 +19,7 @@ import {
   formatRunCompletedMessage,
   formatRunFailedMessage,
 } from "./formatters";
+import { buildPromptWithReplyContext, type ReplyMessage } from "./reply-context";
 import { createTypingHeartbeat } from "./typing-heartbeat";
 
 type Reply = (value: string) => Promise<void> | void;
@@ -51,6 +52,7 @@ type TelegramAttachmentCollectorInput = {
 export type BotTextInput = {
   chatId: bigint;
   text: string;
+  replyToMessage?: ReplyMessage | null;
   startTyping?: StartTyping;
   reply: Reply;
 };
@@ -144,7 +146,7 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
   }
 
   return {
-    async onText({ chatId, text, startTyping, reply }: BotTextInput): Promise<void> {
+    async onText({ chatId, text, replyToMessage, startTyping, reply }: BotTextInput): Promise<void> {
       const stopTyping = await startTyping?.();
       let typingStopped = false;
 
@@ -184,7 +186,15 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
           }
         }
 
-        await runPrompt(chatId, text, replyAfterStoppingTyping);
+        await runPrompt(
+          chatId,
+          await buildPromptWithReplyContext({
+            chatId: normalizeChatId(chatId),
+            messageText: text,
+            replyToMessage,
+          }),
+          replyAfterStoppingTyping,
+        );
       } finally {
         await stopTypingOnce();
       }
@@ -200,6 +210,7 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
     await handlers.onText({
       chatId: BigInt(String(ctx.chat.id)),
       text: ctx.message.text,
+      replyToMessage: (ctx.message as TelegramTextMessage).reply_to_message,
       startTyping: () =>
         createTypingHeartbeat({
           sendTyping: async () => {
@@ -621,6 +632,11 @@ type TelegramDocumentMessage = {
     file_name?: string;
     mime_type?: string | null;
   };
+};
+
+type TelegramTextMessage = {
+  text: string;
+  reply_to_message?: ReplyMessage;
 };
 
 type TelegramPhotoSize = {

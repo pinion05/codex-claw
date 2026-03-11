@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { TelegramBundleCollectorScheduler } from "../../src/files/telegram-bundle-collector";
@@ -174,6 +174,8 @@ function createPhotoContext(options: {
 function createTextContext(options: {
   chatId?: number;
   text: string;
+  messageId?: number;
+  replyToMessage?: Record<string, unknown>;
   replies?: string[];
 }) {
   const replies = options.replies ?? [];
@@ -181,7 +183,9 @@ function createTextContext(options: {
   return {
     chat: { id: options.chatId ?? 123 },
     message: {
+      message_id: options.messageId ?? 1,
       text: options.text,
+      reply_to_message: options.replyToMessage,
     },
     api: {
       getFile: mock(async () => ({
@@ -193,6 +197,85 @@ function createTextContext(options: {
     }),
     replyWithChatAction: mock(async () => undefined),
   } satisfies FakeContext;
+}
+
+function createReplyAuthor(options: {
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+}) {
+  return {
+    first_name: options.firstName,
+    last_name: options.lastName,
+    username: options.username,
+  };
+}
+
+function createRepliedTextMessage(options: {
+  messageId: number;
+  text: string;
+  date?: number;
+  from?: Record<string, unknown>;
+}) {
+  return {
+    message_id: options.messageId,
+    text: options.text,
+    date: options.date,
+    from: options.from,
+  };
+}
+
+function createRepliedDocumentMessage(options: {
+  messageId: number;
+  caption?: string;
+  date?: number;
+  from?: Record<string, unknown>;
+  fileId?: string;
+  fileName?: string;
+  mimeType?: string;
+}) {
+  return {
+    message_id: options.messageId,
+    caption: options.caption,
+    date: options.date,
+    from: options.from,
+    document: {
+      file_id: options.fileId ?? `document-${options.messageId}`,
+      file_name: options.fileName ?? "report.pdf",
+      mime_type: options.mimeType ?? "application/pdf",
+    },
+  };
+}
+
+function createRepliedPhotoMessage(options: {
+  messageId: number;
+  mediaGroupId?: string;
+  caption?: string;
+  date?: number;
+  from?: Record<string, unknown>;
+  fileIdPrefix?: string;
+}) {
+  const fileIdPrefix = options.fileIdPrefix ?? `photo-${options.messageId}`;
+
+  return {
+    message_id: options.messageId,
+    media_group_id: options.mediaGroupId,
+    caption: options.caption,
+    date: options.date,
+    from: options.from,
+    photo: [
+      {
+        file_id: `${fileIdPrefix}-small`,
+        width: 320,
+        height: 180,
+      },
+      {
+        file_id: `${fileIdPrefix}-large`,
+        width: 1280,
+        height: 720,
+      },
+    ],
+  };
 }
 
 describe("createBotHandlers", () => {
@@ -373,6 +456,251 @@ describe("createBotHandlers", () => {
 });
 
 describe("registerBotHandlers", () => {
+  test("text replies prepend structured reply context to the prompt", async () => {
+    const bot = new FakeBot();
+    const replies: string[] = [];
+    const runTurn = mock(async () => ({ summary: "done" }));
+
+    registerBotHandlers(bot as never, {
+      getStatusMessage: mock(async () => "idle"),
+      resetSession: mock(async () => ({ ok: true as const })),
+      abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+      runTurn,
+    });
+
+    await bot.dispatch(
+      "message:text",
+      createTextContext({
+        messageId: 501,
+        text: "What changed?",
+        replyToMessage: createRepliedTextMessage({
+          messageId: 500,
+          text: "Summarize yesterday's report.",
+          date: 1_710_000_000,
+          from: createReplyAuthor({
+            firstName: "Alice",
+            username: "alice",
+          }),
+        }),
+        replies,
+      }),
+    );
+
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    const prompt = (runTurn.mock.calls as unknown[][])[0]?.[1] as string;
+    expect(prompt).toContain("Reply context");
+    expect(prompt).toContain("- messageId: 500");
+    expect(prompt).toContain("- author: Alice (@alice)");
+    expect(prompt).toContain("- sentAt: 2024-03-09T16:00:00.000Z");
+    expect(prompt).toContain("- text: Summarize yesterday's report.");
+    expect(prompt).toContain("Current user message");
+    expect(prompt).toContain("What changed?");
+    expect(replies).toEqual(["done"]);
+  });
+
+  test("document replies include locally known attachment paths when the bundle exists", async () => {
+    const bot = new FakeBot();
+    const replies: string[] = [];
+    const runTurn = mock(async () => ({ summary: "done" }));
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-reply-context-"));
+    const previousWorkspaceDir = process.env.CODEX_WORKSPACE_DIR;
+
+    try {
+      process.env.CODEX_WORKSPACE_DIR = workspaceDir;
+      mkdirSync(path.join(workspaceDir, "inbox", "123", "900"), { recursive: true });
+      writeFileSync(
+        path.join(workspaceDir, "inbox", "123", "900", "bundle.json"),
+        JSON.stringify({
+          version: 2,
+          chatId: 123,
+          messageId: 900,
+          mediaGroupId: null,
+          caption: "Original document caption",
+          attachments: [
+            {
+              index: 1,
+              kind: "document",
+              name: "report.pdf",
+              path: path.join(workspaceDir, "inbox", "123", "900", "1-report.pdf"),
+              mimeType: "application/pdf",
+            },
+          ],
+          failedAttachments: [],
+        }),
+      );
+
+      registerBotHandlers(bot as never, {
+        getStatusMessage: mock(async () => "idle"),
+        resetSession: mock(async () => ({ ok: true as const })),
+        abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+        runTurn,
+      });
+
+      await bot.dispatch(
+        "message:text",
+        createTextContext({
+          messageId: 901,
+          text: "Compare this with the new draft.",
+          replyToMessage: createRepliedDocumentMessage({
+            messageId: 900,
+            caption: "Please review the attached draft.",
+            from: createReplyAuthor({
+              firstName: "Bob",
+            }),
+            fileName: "report.pdf",
+            mimeType: "application/pdf",
+          }),
+          replies,
+        }),
+      );
+
+      expect(runTurn).toHaveBeenCalledTimes(1);
+      const prompt = (runTurn.mock.calls as unknown[][])[0]?.[1] as string;
+      expect(prompt).toContain("Reply context");
+      expect(prompt).toContain("- messageId: 900");
+      expect(prompt).toContain("- author: Bob");
+      expect(prompt).toContain("- caption: Please review the attached draft.");
+      expect(prompt).toContain("- attachment 1: [document] report.pdf");
+      expect(prompt).toContain(
+        `- attachment 1 path: ${path.join(workspaceDir, "inbox", "123", "900", "1-report.pdf")}`,
+      );
+      expect(prompt).toContain("Current user message");
+      expect(prompt).toContain("Compare this with the new draft.");
+      expect(replies).toEqual(["done"]);
+    } finally {
+      if (previousWorkspaceDir === undefined) {
+        delete process.env.CODEX_WORKSPACE_DIR;
+      } else {
+        process.env.CODEX_WORKSPACE_DIR = previousWorkspaceDir;
+      }
+
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("photo replies stay best-effort when no local bundle metadata exists", async () => {
+    const bot = new FakeBot();
+    const replies: string[] = [];
+    const runTurn = mock(async () => ({ summary: "done" }));
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-reply-context-missing-"));
+    const previousWorkspaceDir = process.env.CODEX_WORKSPACE_DIR;
+
+    try {
+      process.env.CODEX_WORKSPACE_DIR = workspaceDir;
+
+      registerBotHandlers(bot as never, {
+        getStatusMessage: mock(async () => "idle"),
+        resetSession: mock(async () => ({ ok: true as const })),
+        abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+        runTurn,
+      });
+
+      await bot.dispatch(
+        "message:text",
+        createTextContext({
+          messageId: 951,
+          text: "Can you extract the text?",
+          replyToMessage: createRepliedPhotoMessage({
+            messageId: 950,
+            caption: "Screenshot from the meeting",
+          }),
+          replies,
+        }),
+      );
+
+      expect(runTurn).toHaveBeenCalledTimes(1);
+      const prompt = (runTurn.mock.calls as unknown[][])[0]?.[1] as string;
+      expect(prompt).toContain("Reply context");
+      expect(prompt).toContain("- messageId: 950");
+      expect(prompt).toContain("- caption: Screenshot from the meeting");
+      expect(prompt).toContain("- attachment 1: [photo]");
+      expect(prompt).not.toContain("attachment 1 path:");
+      expect(prompt).toContain("Current user message");
+      expect(prompt).toContain("Can you extract the text?");
+      expect(replies).toEqual(["done"]);
+    } finally {
+      if (previousWorkspaceDir === undefined) {
+        delete process.env.CODEX_WORKSPACE_DIR;
+      } else {
+        process.env.CODEX_WORKSPACE_DIR = previousWorkspaceDir;
+      }
+
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("album replies recover locally known attachment paths through the media group id", async () => {
+    const bot = new FakeBot();
+    const replies: string[] = [];
+    const runTurn = mock(async () => ({ summary: "done" }));
+    const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "codex-claw-reply-context-album-"));
+    const previousWorkspaceDir = process.env.CODEX_WORKSPACE_DIR;
+
+    try {
+      process.env.CODEX_WORKSPACE_DIR = workspaceDir;
+      mkdirSync(path.join(workspaceDir, "inbox", "123", "900"), { recursive: true });
+      writeFileSync(
+        path.join(workspaceDir, "inbox", "123", "900", "bundle.json"),
+        JSON.stringify({
+          version: 2,
+          chatId: 123,
+          messageId: 900,
+          mediaGroupId: "album-1",
+          caption: "Album caption",
+          attachments: [
+            {
+              index: 1,
+              kind: "photo",
+              name: "photo-900.jpg",
+              path: path.join(workspaceDir, "inbox", "123", "900", "1-photo-900.jpg"),
+              mimeType: "image/jpeg",
+            },
+          ],
+          failedAttachments: [],
+        }),
+      );
+
+      registerBotHandlers(bot as never, {
+        getStatusMessage: mock(async () => "idle"),
+        resetSession: mock(async () => ({ ok: true as const })),
+        abortRun: mock(async () => ({ ok: false as const, reason: "not-running" as const })),
+        runTurn,
+      });
+
+      await bot.dispatch(
+        "message:text",
+        createTextContext({
+          messageId: 952,
+          text: "Use the replied photo as context.",
+          replyToMessage: createRepliedPhotoMessage({
+            messageId: 901,
+            mediaGroupId: "album-1",
+            caption: "Album caption",
+          }),
+          replies,
+        }),
+      );
+
+      expect(runTurn).toHaveBeenCalledTimes(1);
+      const prompt = (runTurn.mock.calls as unknown[][])[0]?.[1] as string;
+      expect(prompt).toContain("- messageId: 901");
+      expect(prompt).toContain("- caption: Album caption");
+      expect(prompt).toContain("- attachment 1: [photo] photo-900.jpg");
+      expect(prompt).toContain(
+        `- attachment 1 path: ${path.join(workspaceDir, "inbox", "123", "900", "1-photo-900.jpg")}`,
+      );
+      expect(replies).toEqual(["done"]);
+    } finally {
+      if (previousWorkspaceDir === undefined) {
+        delete process.env.CODEX_WORKSPACE_DIR;
+      } else {
+        process.env.CODEX_WORKSPACE_DIR = previousWorkspaceDir;
+      }
+
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+  });
+
   test("document messages prepare attachments and run one turn", async () => {
     const bot = new FakeBot();
     const replies: string[] = [];
