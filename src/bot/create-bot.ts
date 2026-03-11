@@ -18,6 +18,7 @@ import {
   formatRunCompletedMessage,
   formatRunFailedMessage,
 } from "./formatters";
+import { buildPromptWithReplyContext, type ReplyMessage } from "./reply-context";
 import { createTypingHeartbeat } from "./typing-heartbeat";
 
 type Reply = (value: string) => Promise<void> | void;
@@ -50,6 +51,7 @@ type TelegramAttachmentCollectorInput = {
 export type BotTextInput = {
   chatId: bigint;
   text: string;
+  replyToMessage?: ReplyMessage | null;
   startTyping?: StartTyping;
   reply: Reply;
 };
@@ -59,6 +61,11 @@ type BotPromptInput = {
   prompt: string;
   startTyping?: StartTyping;
   reply: Reply;
+};
+
+type AttachmentPromptContext = Omit<BotPromptInput, "prompt"> & {
+  normalizedChatId: number;
+  replyToMessage?: ReplyMessage | null;
 };
 
 export type DownloadedTelegramFile = {
@@ -143,7 +150,7 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
   }
 
   return {
-    async onText({ chatId, text, startTyping, reply }: BotTextInput): Promise<void> {
+    async onText({ chatId, text, replyToMessage, startTyping, reply }: BotTextInput): Promise<void> {
       const stopTyping = await startTyping?.();
       let typingStopped = false;
 
@@ -182,7 +189,15 @@ export function createBotHandlers(deps: CreateBotHandlersDeps) {
           return;
         }
 
-        await runPrompt(chatId, text, replyAfterStoppingTyping);
+        await runPrompt(
+          chatId,
+          await buildPromptWithReplyContext({
+            chatId: normalizeChatId(chatId),
+            messageText: text,
+            replyToMessage,
+          }),
+          replyAfterStoppingTyping,
+        );
       } finally {
         await stopTypingOnce();
       }
@@ -198,6 +213,7 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
     await handlers.onText({
       chatId: BigInt(String(ctx.chat.id)),
       text: ctx.message.text,
+      replyToMessage: (ctx.message as TelegramTextMessage).reply_to_message,
       startTyping: () =>
         createTypingHeartbeat({
           sendTyping: async () => {
@@ -211,8 +227,8 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
   });
 
   if (deps.prepareAttachments) {
-    const attachmentContexts = new Map<string, Omit<BotPromptInput, "prompt">>();
-    let immediateAttachmentContext: Omit<BotPromptInput, "prompt"> | null = null;
+    const attachmentContexts = new Map<string, AttachmentPromptContext>();
+    let immediateAttachmentContext: AttachmentPromptContext | null = null;
     const downloadTelegramFile =
       deps.downloadTelegramFile ?? createTelegramFileDownloader(bot as Bot<Context>);
     const collector = new TelegramBundleCollector<TelegramAttachmentDescriptor>({
@@ -245,7 +261,10 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
           normalizeChatId(ctx.chat.id),
           ctx.message as TelegramDocumentMessage,
         );
-        const context = createPromptContext(ctx);
+        const context = createPromptContext(
+          ctx,
+          (ctx.message as TelegramDocumentMessage).reply_to_message,
+        );
 
         if (input.mediaGroupId) {
           const key = buildTelegramBundleCollectorKey(input.chatId, input.mediaGroupId);
@@ -282,7 +301,10 @@ export function registerBotHandlers(bot: Bot<Context>, deps: CreateBotHandlersDe
           normalizeChatId(ctx.chat.id),
           ctx.message as TelegramPhotoMessage,
         );
-        const context = createPromptContext(ctx);
+        const context = createPromptContext(
+          ctx,
+          (ctx.message as TelegramPhotoMessage).reply_to_message,
+        );
 
         if (input.mediaGroupId) {
           const key = buildTelegramBundleCollectorKey(input.chatId, input.mediaGroupId);
@@ -325,7 +347,10 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-function createPromptContext(ctx: Context): Omit<BotPromptInput, "prompt"> {
+function createPromptContext(
+  ctx: Context,
+  replyToMessage?: ReplyMessage | null,
+): AttachmentPromptContext {
   const chatId = ctx.chat?.id;
 
   if (chatId == null) {
@@ -334,6 +359,8 @@ function createPromptContext(ctx: Context): Omit<BotPromptInput, "prompt"> {
 
   return {
     chatId: BigInt(String(chatId)),
+    normalizedChatId: normalizeChatId(chatId),
+    replyToMessage,
     startTyping: () =>
       createTypingHeartbeat({
         sendTyping: async () => {
@@ -433,9 +460,9 @@ function createPhotoBundleInput(
 
 function resolveAttachmentContext(
   bundle: TelegramBundle<TelegramAttachmentDescriptor>,
-  attachmentContexts: Map<string, Omit<BotPromptInput, "prompt">>,
-  immediateAttachmentContext: Omit<BotPromptInput, "prompt"> | null,
-): Omit<BotPromptInput, "prompt"> | null {
+  attachmentContexts: Map<string, AttachmentPromptContext>,
+  immediateAttachmentContext: AttachmentPromptContext | null,
+): AttachmentPromptContext | null {
   if (!bundle.mediaGroupId) {
     return immediateAttachmentContext;
   }
@@ -449,7 +476,7 @@ function normalizeChatId(chatId: number | bigint): number {
 
 async function processFinalizedAttachmentBundle(
   bundle: TelegramBundle<TelegramAttachmentDescriptor>,
-  context: Omit<BotPromptInput, "prompt">,
+  context: AttachmentPromptContext,
   onPrompt: (input: BotPromptInput) => Promise<void>,
   prepareAttachments:
     | ((input: TelegramAttachmentBundleInput) => Promise<string>)
@@ -458,7 +485,7 @@ async function processFinalizedAttachmentBundle(
 ): Promise<void> {
   try {
     const preparedBundle = await materializePreparedAttachmentBundle(bundle, downloadTelegramFile);
-    const prompt = await prepareAttachments?.({
+    const preparedPrompt = await prepareAttachments?.({
       chatId: preparedBundle.chatId,
       messageId: preparedBundle.messageId,
       mediaGroupId: preparedBundle.mediaGroupId,
@@ -467,9 +494,15 @@ async function processFinalizedAttachmentBundle(
       failedAttachments: preparedBundle.failedAttachments,
     });
 
-    if (!prompt) {
+    if (!preparedPrompt) {
       return;
     }
+
+    const prompt = await buildPromptWithReplyContext({
+      chatId: context.normalizedChatId,
+      messageText: preparedPrompt,
+      replyToMessage: context.replyToMessage,
+    });
 
     await onPrompt({
       chatId: context.chatId,
@@ -608,11 +641,17 @@ type TelegramDocumentMessage = {
   message_id: number;
   media_group_id?: string;
   caption?: string;
+  reply_to_message?: ReplyMessage;
   document: {
     file_id: string;
     file_name?: string;
     mime_type?: string | null;
   };
+};
+
+type TelegramTextMessage = {
+  text: string;
+  reply_to_message?: ReplyMessage;
 };
 
 type TelegramPhotoSize = {
@@ -625,5 +664,6 @@ type TelegramPhotoMessage = {
   message_id: number;
   media_group_id?: string;
   caption?: string;
+  reply_to_message?: ReplyMessage;
   photo: TelegramPhotoSize[];
 };
