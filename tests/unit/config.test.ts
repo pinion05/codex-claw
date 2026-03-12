@@ -1,7 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import path from "node:path";
-import { loadConfig } from "../../src/config";
 import { resolveWorkspaceDir } from "../../src/lib/paths";
+
+type ConfigModule = typeof import("../../src/config");
+
+afterEach(() => {
+  mock.restore();
+});
+
+async function loadConfigModule(): Promise<ConfigModule> {
+  return import(`../../src/config.ts?test=${Date.now()}-${Math.random()}`);
+}
 
 describe("resolveWorkspaceDir", () => {
   test("uses the default ~/.codex-claw/workspace when env is missing", () => {
@@ -29,23 +38,25 @@ describe("resolveWorkspaceDir", () => {
 });
 
 describe("loadConfig", () => {
-  test("loads the telegram token, optional OpenAI key override, and resolved workspace dir", () => {
+  test("loads the telegram token, optional OpenAI key override, and resolved workspace dir", async () => {
+    const { loadConfig } = await loadConfigModule();
+
     expect(
       loadConfig({
         TELEGRAM_BOT_TOKEN: "telegram-token",
         OPENAI_API_KEY: "openai-key",
         CODEX_WORKSPACE_DIR: "/tmp/claw",
-        TELEGRAM_SYNC_COMMANDS: "true",
       }),
     ).toEqual({
       telegramBotToken: "telegram-token",
       openAiApiKey: "openai-key",
       workspaceDir: "/tmp/claw",
-      syncTelegramCommandsOnStartup: true,
     });
   });
 
-  test("allows config without OPENAI_API_KEY so local codex login can be reused", () => {
+  test("allows config without OPENAI_API_KEY so local codex login can be reused", async () => {
+    const { loadConfig } = await loadConfigModule();
+
     expect(
       loadConfig({
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -54,23 +65,23 @@ describe("loadConfig", () => {
       telegramBotToken: "telegram-token",
       openAiApiKey: null,
       workspaceDir: resolveWorkspaceDir({}),
-      syncTelegramCommandsOnStartup: false,
     });
   });
 
-  test("returns null token values when env overrides are missing", () => {
+  test("returns null token values when env overrides are missing", async () => {
+    const { loadConfig } = await loadConfigModule();
+
     expect(loadConfig({})).toEqual({
       telegramBotToken: null,
       openAiApiKey: null,
       workspaceDir: resolveWorkspaceDir({}),
-      syncTelegramCommandsOnStartup: false,
     });
   });
 
-  test("treats TELEGRAM_SYNC_COMMANDS as a boolean flag", () => {
-    expect(loadConfig({ TELEGRAM_SYNC_COMMANDS: "1" }).syncTelegramCommandsOnStartup).toBe(true);
-    expect(loadConfig({ TELEGRAM_SYNC_COMMANDS: "yes" }).syncTelegramCommandsOnStartup).toBe(true);
-    expect(loadConfig({ TELEGRAM_SYNC_COMMANDS: "false" }).syncTelegramCommandsOnStartup).toBe(
+  test("does not expose a Telegram command sync toggle in runtime config", async () => {
+    const { loadConfig } = await loadConfigModule();
+
+    expect("syncTelegramCommandsOnStartup" in loadConfig({ TELEGRAM_SYNC_COMMANDS: "false" })).toBe(
       false,
     );
   });

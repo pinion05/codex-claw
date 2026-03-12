@@ -12,7 +12,7 @@ async function loadIndexModule(): Promise<IndexModule> {
 }
 
 describe("main", () => {
-  test("does not sync Telegram commands during bot startup unless explicitly enabled", async () => {
+  test("syncs Telegram commands during bot startup by default", async () => {
     const ensureWorkspaceDirectories = mock(async () => undefined);
     const registerBotHandlers = mock((_bot: unknown, _handlers: unknown) => undefined);
     const startBackgroundServices = mock(async () => undefined);
@@ -52,74 +52,6 @@ describe("main", () => {
       loadConfig: () => ({
         telegramBotToken: undefined,
         workspaceDir: "/tmp/codex-claw-workspace",
-        syncTelegramCommandsOnStartup: false,
-      }),
-    }));
-    mock.module("../../src/config/local-config.ts", () => ({
-      createLocalConfigStore: () => ({
-        path: "/tmp/codex-claw-local-config.json",
-      }),
-    }));
-    mock.module("../../src/config/telegram-bot-token.ts", () => ({
-      ...actualTelegramBotTokenModule,
-      promptForTelegramBotToken: mock(async () => {
-        throw new Error("prompt should not be used in this test");
-      }),
-      resolveTelegramBotTokenWithStore,
-    }));
-    mock.module("../../src/runtime/create-runtime-deps.ts", () => ({ createRuntimeDeps }));
-    mock.module("../../src/runtime/workspace.ts", () => ({ ensureWorkspaceDirectories }));
-
-    const { main } = await loadIndexModule();
-    await main();
-
-    expect(syncTelegramCommands).not.toHaveBeenCalled();
-    expect(botStart).toHaveBeenCalledTimes(1);
-    expect(startBackgroundServices).toHaveBeenCalledTimes(1);
-    expect(stopBackgroundServices).toHaveBeenCalledTimes(1);
-  });
-
-  test("syncs Telegram commands during bot startup when explicitly enabled", async () => {
-    const ensureWorkspaceDirectories = mock(async () => undefined);
-    const registerBotHandlers = mock((_bot: unknown, _handlers: unknown) => undefined);
-    const startBackgroundServices = mock(async () => undefined);
-    const stopBackgroundServices = mock(() => undefined);
-    const createRuntimeDeps = mock(() => ({
-      startBackgroundServices,
-      stopBackgroundServices,
-    }));
-    const resolveTelegramBotTokenWithStore = mock(async () => ({
-      token: "telegram-token",
-      source: "env" as const,
-    }));
-    const syncTelegramCommands = mock(async () => undefined);
-    const sendMessage = mock(async () => undefined);
-    const botCatch = mock((_handler: unknown) => undefined);
-    const botStart = mock(
-      async (options?: { onStart?: (botInfo: { username: string }) => void }) => {
-        options?.onStart?.({ username: "codex-claw-bot" });
-      },
-    );
-
-    class FakeBot {
-      readonly api = {
-        sendMessage,
-      };
-
-      constructor(readonly token: string) {}
-
-      catch = botCatch;
-      start = botStart;
-    }
-
-    mock.module("grammy", () => ({ Bot: FakeBot }));
-    mock.module("../../src/bot/create-bot.ts", () => ({ registerBotHandlers }));
-    mock.module("../../src/bot/telegram-command-sync.ts", () => ({ syncTelegramCommands }));
-    mock.module("../../src/config.ts", () => ({
-      loadConfig: () => ({
-        telegramBotToken: undefined,
-        workspaceDir: "/tmp/codex-claw-workspace",
-        syncTelegramCommandsOnStartup: true,
       }),
     }));
     mock.module("../../src/config/local-config.ts", () => ({
@@ -147,7 +79,74 @@ describe("main", () => {
     expect(stopBackgroundServices).toHaveBeenCalledTimes(1);
   });
 
-  test("does not wait for syncTelegramCommands before starting the bot when sync is enabled", async () => {
+  test("keeps startup wiring working when the sync call resolves", async () => {
+    const ensureWorkspaceDirectories = mock(async () => undefined);
+    const registerBotHandlers = mock((_bot: unknown, _handlers: unknown) => undefined);
+    const startBackgroundServices = mock(async () => undefined);
+    const stopBackgroundServices = mock(() => undefined);
+    const createRuntimeDeps = mock(() => ({
+      startBackgroundServices,
+      stopBackgroundServices,
+    }));
+    const resolveTelegramBotTokenWithStore = mock(async () => ({
+      token: "telegram-token",
+      source: "env" as const,
+    }));
+    const syncTelegramCommands = mock(async () => undefined);
+    const sendMessage = mock(async () => undefined);
+    const botCatch = mock((_handler: unknown) => undefined);
+    const botStart = mock(
+      async (options?: { onStart?: (botInfo: { username: string }) => void }) => {
+        options?.onStart?.({ username: "codex-claw-bot" });
+      },
+    );
+
+    class FakeBot {
+      readonly api = {
+        sendMessage,
+      };
+
+      constructor(readonly token: string) {}
+
+      catch = botCatch;
+      start = botStart;
+    }
+
+    mock.module("grammy", () => ({ Bot: FakeBot }));
+    mock.module("../../src/bot/create-bot.ts", () => ({ registerBotHandlers }));
+    mock.module("../../src/bot/telegram-command-sync.ts", () => ({ syncTelegramCommands }));
+    mock.module("../../src/config.ts", () => ({
+      loadConfig: () => ({
+        telegramBotToken: undefined,
+        workspaceDir: "/tmp/codex-claw-workspace",
+      }),
+    }));
+    mock.module("../../src/config/local-config.ts", () => ({
+      createLocalConfigStore: () => ({
+        path: "/tmp/codex-claw-local-config.json",
+      }),
+    }));
+    mock.module("../../src/config/telegram-bot-token.ts", () => ({
+      ...actualTelegramBotTokenModule,
+      promptForTelegramBotToken: mock(async () => {
+        throw new Error("prompt should not be used in this test");
+      }),
+      resolveTelegramBotTokenWithStore,
+    }));
+    mock.module("../../src/runtime/create-runtime-deps.ts", () => ({ createRuntimeDeps }));
+    mock.module("../../src/runtime/workspace.ts", () => ({ ensureWorkspaceDirectories }));
+
+    const { main } = await loadIndexModule();
+    await main();
+
+    expect(syncTelegramCommands).toHaveBeenCalledTimes(1);
+    expect(syncTelegramCommands).toHaveBeenCalledWith(expect.any(FakeBot));
+    expect(botStart).toHaveBeenCalledTimes(1);
+    expect(startBackgroundServices).toHaveBeenCalledTimes(1);
+    expect(stopBackgroundServices).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not wait for syncTelegramCommands before starting the bot", async () => {
     const ensureWorkspaceDirectories = mock(async () => undefined);
     const registerBotHandlers = mock((_bot: unknown, _handlers: unknown) => undefined);
     const startBackgroundServices = mock(async () => undefined);
@@ -192,7 +191,6 @@ describe("main", () => {
       loadConfig: () => ({
         telegramBotToken: undefined,
         workspaceDir: "/tmp/codex-claw-workspace",
-        syncTelegramCommandsOnStartup: true,
       }),
     }));
     mock.module("../../src/config/local-config.ts", () => ({

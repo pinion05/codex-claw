@@ -34,9 +34,7 @@ export async function main(): Promise<void> {
   });
 
   registerBotHandlers(bot, handlers);
-  if (config.syncTelegramCommandsOnStartup) {
-    void syncTelegramCommands(bot);
-  }
+  void syncTelegramCommands(bot);
 
   if (telegramToken.source === "prompt") {
     console.info(`[codex-claw] saved TELEGRAM_BOT_TOKEN to ${localConfigStore.path}`);
