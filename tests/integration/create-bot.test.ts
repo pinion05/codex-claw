@@ -1635,7 +1635,6 @@ describe("registerBotHandlers", () => {
         telegramBotToken: null,
         openAiApiKey: "test-key",
         workspaceDir,
-        syncTelegramCommandsOnStartup: false,
       });
 
       const prompt = await deps.prepareAttachments?.({

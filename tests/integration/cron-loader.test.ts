@@ -130,7 +130,6 @@ describe("createRuntimeDeps cron wiring", () => {
           telegramBotToken: null,
           openAiApiKey: null,
           workspaceDir,
-          syncTelegramCommandsOnStartup: false,
         },
         {
           createSdkRuntimeClientFn: () => ({ runTurn }),
@@ -259,7 +258,6 @@ describe("createRuntimeDeps cron wiring", () => {
           telegramBotToken: null,
           openAiApiKey: null,
           workspaceDir,
-          syncTelegramCommandsOnStartup: false,
         },
         {
           createSdkRuntimeClientFn: () => ({ runTurn }),
@@ -380,7 +378,6 @@ describe("createRuntimeDeps cron wiring", () => {
           telegramBotToken: null,
           openAiApiKey: null,
           workspaceDir,
-          syncTelegramCommandsOnStartup: false,
         },
         {
           createSdkRuntimeClientFn: () => ({ runTurn }),
@@ -503,7 +500,6 @@ describe("createRuntimeDeps cron wiring", () => {
           telegramBotToken: null,
           openAiApiKey: null,
           workspaceDir,
-          syncTelegramCommandsOnStartup: false,
         },
         {
           createSdkRuntimeClientFn: () => ({
@@ -568,7 +564,6 @@ describe("createRuntimeDeps cron wiring", () => {
           telegramBotToken: null,
           openAiApiKey: null,
           workspaceDir,
-          syncTelegramCommandsOnStartup: false,
         },
         {
           createSdkRuntimeClientFn: () => ({
