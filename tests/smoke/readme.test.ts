@@ -52,6 +52,6 @@ describe("README", () => {
     expect(readme).toContain(
       "If Telegram rejects that sync request, bot startup still continues and the CLI only logs a warning.",
     );
-    expect(readme).not.toContain("TELEGRAM_SYNC_COMMANDS=1");
+    expect(readme).not.toContain("TELEGRAM_SYNC_COMMANDS");
   });
 });

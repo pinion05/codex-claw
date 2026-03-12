@@ -22,9 +22,9 @@ Telegram slash-command menu synchronization should always be attempted during st
 
 ## Current State
 
-- [src/config.ts](/Users/pinion/.config/superpowers/worktrees/codex-claw/feature-telegram-command-sync-always-on/src/config.ts) exposes `syncTelegramCommandsOnStartup`.
-- [src/index.ts](/Users/pinion/.config/superpowers/worktrees/codex-claw/feature-telegram-command-sync-always-on/src/index.ts) only calls Telegram sync when that flag is true.
-- [README.md](/Users/pinion/.config/superpowers/worktrees/codex-claw/feature-telegram-command-sync-always-on/README.md) documents `TELEGRAM_SYNC_COMMANDS=1` as the enable switch.
+- [src/config.ts](../../src/config.ts) exposes `syncTelegramCommandsOnStartup`.
+- [src/index.ts](../../src/index.ts) only calls Telegram sync when that flag is true.
+- [README.md](../../README.md) documents `TELEGRAM_SYNC_COMMANDS=1` as the enable switch.
 
 This makes command menu sync optional, which does not match the desired product behavior of "always keep Telegram command suggestions aligned."
 

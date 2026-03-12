@@ -167,9 +167,14 @@ describe("main", () => {
     );
     const sendMessage = mock(async () => undefined);
     const botCatch = mock((_handler: unknown) => undefined);
+    let resolveBotStartReached!: () => void;
+    const botStartReached = new Promise<void>((resolve) => {
+      resolveBotStartReached = resolve;
+    });
     const botStart = mock(
       async (options?: { onStart?: (botInfo: { username: string }) => void }) => {
         options?.onStart?.({ username: "codex-claw-bot" });
+        resolveBotStartReached();
       },
     );
 
@@ -211,14 +216,8 @@ describe("main", () => {
     const { main } = await loadIndexModule();
     const startup = main();
 
-    await expect(
-      Promise.race([
-        startup.then(() => "resolved"),
-        new Promise<string>((resolve) => {
-          setTimeout(() => resolve("timed-out"), 20);
-        }),
-      ]),
-    ).resolves.toBe("resolved");
+    await botStartReached;
+    await expect(startup).resolves.toBeUndefined();
 
     expect(syncTelegramCommands).toHaveBeenCalledTimes(1);
     expect(botStart).toHaveBeenCalledTimes(1);
